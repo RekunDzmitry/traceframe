@@ -1,0 +1,331 @@
+#!/usr/bin/env node
+// traceframe — Claude Code hook CLI.
+//
+//   traceframe session-start   (SessionStart hook: spawns tail, emits trace.started)
+//   traceframe session-stop    (Stop hook: signals tail, emits trace.closed)
+//   traceframe tail            (background worker: tails transcript → events)
+//
+// All three expect TRACEFRAME_API_KEY and TRACEFRAME_ENDPOINT in env.
+// session-start / session-stop read the hook payload from stdin.
+
+import { readFileSync, existsSync, mkdirSync, statSync, openSync, readSync, closeSync, writeFileSync, unlinkSync, appendFileSync } from "node:fs";
+import { spawn } from "node:child_process";
+import { join } from "node:path";
+import { tmpdir, hostname } from "node:os";
+
+const ENDPOINT = process.env.TRACEFRAME_ENDPOINT || "http://localhost:4000";
+const API_KEY = process.env.TRACEFRAME_API_KEY;
+const STATE_DIR = join(tmpdir(), "traceframe");
+mkdirSync(STATE_DIR, { recursive: true });
+
+const now = () => new Date().toISOString();
+const traceIdFor = (sessionId) => `trc_${sessionId.replace(/[^A-Za-z0-9_-]/g, "").slice(0, 48) || "anon"}`;
+const statePath = (sessionId) => join(STATE_DIR, `${sessionId}.json`);
+const logPath = (sessionId) => join(STATE_DIR, `${sessionId}.log`);
+
+const log = (sessionId, msg) => {
+  try {
+    appendFileSync(logPath(sessionId), `[${now()}] ${msg}\n`);
+  } catch {}
+};
+
+const isAlive = (pid) => {
+  if (!pid) return false;
+  try { process.kill(pid, 0); return true; } catch { return false; }
+};
+
+const readStdinJson = async () => {
+  const chunks = [];
+  for await (const c of process.stdin) chunks.push(c);
+  const raw = Buffer.concat(chunks).toString("utf8").trim();
+  if (!raw) return {};
+  try { return JSON.parse(raw); } catch { return {}; }
+};
+
+const postEvents = async (events) => {
+  if (!API_KEY) throw new Error("TRACEFRAME_API_KEY not set");
+  const res = await fetch(`${ENDPOINT}/ingest/events`, {
+    method: "POST",
+    headers: { "content-type": "application/json", authorization: `Bearer ${API_KEY}` },
+    body: JSON.stringify({ events }),
+  });
+  if (!res.ok) throw new Error(`ingest ${res.status}: ${await res.text()}`);
+  return res.json();
+};
+
+// ─────────────────────────── session-start ───────────────────────────
+
+const sessionStart = async () => {
+  const payload = await readStdinJson();
+  const sessionId = payload.session_id || payload.sessionId;
+  const transcript = payload.transcript_path || payload.transcriptPath;
+  if (!sessionId || !transcript) {
+    console.error("session-start: missing session_id or transcript_path");
+    process.exit(0);
+  }
+
+  // Claude Code re-fires SessionStart on compact/resume/clear. If the previous
+  // tail worker is still alive, a second one would re-read the transcript from
+  // offset 0 and re-emit every line — flooding the dashboard with duplicates.
+  // Skip silently in that case.
+  const sp = statePath(sessionId);
+  if (existsSync(sp)) {
+    try {
+      const prev = JSON.parse(readFileSync(sp, "utf8"));
+      if (isAlive(prev.tailPid)) {
+        log(sessionId, `session-start re-fire ignored (tail pid=${prev.tailPid} alive, source=${payload.source || "?"})`);
+        return;
+      }
+    } catch {}
+  }
+
+  const traceId = traceIdFor(sessionId);
+  const meta = {
+    sessionId,
+    traceId,
+    transcript,
+    cwd: payload.cwd || process.cwd(),
+    source: payload.source || "startup",
+    model: payload.model,
+    host: hostname(),
+    startedAt: now(),
+  };
+  writeFileSync(statePath(sessionId), JSON.stringify(meta, null, 2));
+
+  try {
+    await postEvents([{
+      type: "trace.started",
+      at: meta.startedAt,
+      traceId,
+      sessionId,
+      trace: {
+        id: traceId,
+        title: `Claude Code: ${payload.source || "session"}`,
+        repo: meta.cwd,
+        branch: "",
+        startedAt: meta.startedAt,
+        duration: 0,
+        totalTokens: 0,
+        totalCost: 0,
+        status: "running",
+      },
+      source: meta.source,
+      model: meta.model,
+      cwd: meta.cwd,
+      host: meta.host,
+    }]);
+  } catch (e) {
+    log(sessionId, `trace.started failed: ${e.message}`);
+  }
+
+  // Spawn detached tail worker. Inherits env (API key, endpoint).
+  const self = process.argv[1];
+  const out = openSync(logPath(sessionId), "a");
+  const child = spawn(process.execPath, [self, "tail", sessionId], {
+    detached: true,
+    stdio: ["ignore", out, out],
+    env: process.env,
+  });
+  child.unref();
+  log(sessionId, `spawned tail pid=${child.pid}`);
+
+  const state = { ...meta, tailPid: child.pid };
+  writeFileSync(statePath(sessionId), JSON.stringify(state, null, 2));
+};
+
+// ─────────────────────────── tail worker ───────────────────────────
+
+const BATCH_INTERVAL_MS = 500;
+const POLL_INTERVAL_MS = 500;
+const MAX_BATCH = 50;
+
+const summarizeMessage = (msg) => {
+  if (!msg || typeof msg !== "object") return { text: "", hasToolUse: false, toolUses: [] };
+  let text = "";
+  const toolUses = [];
+  if (typeof msg.content === "string") {
+    text = msg.content;
+  } else if (Array.isArray(msg.content)) {
+    for (const block of msg.content) {
+      if (!block || typeof block !== "object") continue;
+      if (block.type === "text" && typeof block.text === "string") text += block.text;
+      else if (block.type === "tool_use") toolUses.push({ id: block.id, name: block.name, input: block.input });
+      else if (block.type === "tool_result") {
+        const c = typeof block.content === "string" ? block.content : JSON.stringify(block.content);
+        text += `[tool_result ${block.tool_use_id}] ${c}`;
+      }
+    }
+  }
+  return { text, hasToolUse: toolUses.length > 0, toolUses };
+};
+
+const lineToEvent = (line, traceId, sessionId) => {
+  let raw;
+  try { raw = JSON.parse(line); } catch { return null; }
+  const msg = raw.message || {};
+  const summary = summarizeMessage(msg);
+  return {
+    type: "transcript.line",
+    at: raw.timestamp || now(),
+    traceId,
+    sessionId,
+    uuid: raw.uuid,
+    parentUuid: raw.parentUuid,
+    role: msg.role || raw.type,
+    kind: raw.type,
+    model: msg.model,
+    usage: msg.usage,
+    text: summary.text.slice(0, 4000),
+    hasToolUse: summary.hasToolUse,
+    toolUses: summary.toolUses,
+    raw,
+  };
+};
+
+const tailLoop = async () => {
+  const sessionId = process.argv[3];
+  if (!sessionId) { console.error("tail: session_id required"); process.exit(1); }
+  if (!existsSync(statePath(sessionId))) { console.error("tail: no state file"); process.exit(1); }
+
+  const state = JSON.parse(readFileSync(statePath(sessionId), "utf8"));
+  const { traceId, transcript } = state;
+
+  log(sessionId, `tail started pid=${process.pid} transcript=${transcript}`);
+
+  let offset = 0;
+  let remainder = "";
+  let stopped = false;
+  let batch = [];
+  let flushTimer = null;
+
+  const flush = async () => {
+    if (!batch.length) return;
+    const toSend = batch;
+    batch = [];
+    try {
+      await postEvents(toSend);
+      log(sessionId, `flushed ${toSend.length}`);
+    } catch (e) {
+      log(sessionId, `flush failed: ${e.message}; re-queueing ${toSend.length}`);
+      batch.unshift(...toSend);
+    }
+  };
+
+  const scheduleFlush = () => {
+    if (flushTimer) return;
+    flushTimer = setTimeout(async () => {
+      flushTimer = null;
+      await flush();
+    }, BATCH_INTERVAL_MS);
+  };
+
+  const enqueue = (ev) => {
+    batch.push(ev);
+    if (batch.length >= MAX_BATCH) {
+      if (flushTimer) { clearTimeout(flushTimer); flushTimer = null; }
+      flush();
+    } else {
+      scheduleFlush();
+    }
+  };
+
+  const poll = () => {
+    if (stopped) return;
+    if (!existsSync(transcript)) {
+      setTimeout(poll, POLL_INTERVAL_MS);
+      return;
+    }
+    let st;
+    try { st = statSync(transcript); } catch { setTimeout(poll, POLL_INTERVAL_MS); return; }
+
+    if (st.size < offset) {
+      log(sessionId, `transcript shrank ${offset} → ${st.size}, resetting`);
+      offset = 0;
+      remainder = "";
+    }
+    if (st.size > offset) {
+      const fd = openSync(transcript, "r");
+      const buf = Buffer.alloc(st.size - offset);
+      try { readSync(fd, buf, 0, buf.length, offset); } finally { closeSync(fd); }
+      offset = st.size;
+      const chunk = remainder + buf.toString("utf8");
+      const lines = chunk.split("\n");
+      remainder = lines.pop() || "";
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        const ev = lineToEvent(line, traceId, sessionId);
+        if (ev) enqueue(ev);
+      }
+    }
+    setTimeout(poll, POLL_INTERVAL_MS);
+  };
+
+  const shutdown = async (signal) => {
+    if (stopped) return;
+    stopped = true;
+    log(sessionId, `shutdown signal=${signal}`);
+    if (flushTimer) { clearTimeout(flushTimer); flushTimer = null; }
+    await flush();
+    process.exit(0);
+  };
+  process.on("SIGTERM", () => shutdown("SIGTERM"));
+  process.on("SIGINT", () => shutdown("SIGINT"));
+
+  poll();
+};
+
+// ─────────────────────────── session-stop ───────────────────────────
+
+const sessionStop = async () => {
+  const payload = await readStdinJson();
+  const sessionId = payload.session_id || payload.sessionId;
+  if (!sessionId) { console.error("session-stop: missing session_id"); process.exit(0); }
+
+  const sp = statePath(sessionId);
+  if (!existsSync(sp)) {
+    console.error(`session-stop: no state for ${sessionId}`);
+    return;
+  }
+  const state = JSON.parse(readFileSync(sp, "utf8"));
+
+  // Ask the tail worker to drain and exit.
+  if (state.tailPid) {
+    try { process.kill(state.tailPid, "SIGTERM"); } catch (e) { log(sessionId, `kill failed: ${e.message}`); }
+  }
+
+  // Give the worker up to ~3s to flush.
+  const deadline = Date.now() + 3000;
+  while (Date.now() < deadline) {
+    try { process.kill(state.tailPid, 0); } catch { break; }
+    await new Promise((r) => setTimeout(r, 100));
+  }
+
+  const closedAt = now();
+  const duration = Math.max(0, Date.parse(closedAt) - Date.parse(state.startedAt));
+  try {
+    await postEvents([{
+      type: "trace.closed",
+      at: closedAt,
+      traceId: state.traceId,
+      sessionId,
+      status: "done",
+      duration,
+    }]);
+  } catch (e) {
+    log(sessionId, `trace.closed failed: ${e.message}`);
+  }
+
+  try { unlinkSync(sp); } catch {}
+};
+
+// ─────────────────────────── dispatch ───────────────────────────
+
+const cmd = process.argv[2];
+const run = async () => {
+  if (cmd === "session-start") return sessionStart();
+  if (cmd === "session-stop") return sessionStop();
+  if (cmd === "tail") return tailLoop();
+  console.error("usage: traceframe <session-start|session-stop|tail>");
+  process.exit(2);
+};
+run().catch((e) => { console.error(e); process.exit(1); });

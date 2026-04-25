@@ -1,0 +1,1418 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<title>traceframe — live</title>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet"/>
+<style>
+:root {
+  --bg: #fafaf9;
+  --surface: #f5f5f4;
+  --surface-2: #ececeb;
+  --border: #e7e5e4;
+  --border-strong: #d6d3d1;
+  --ink: #1c1917;
+  --muted: #78716c;
+  --muted-2: #a8a29e;
+  --accent-green: oklch(0.72 0.14 145);
+  --accent-green-soft: oklch(0.92 0.06 145);
+  --accent-amber: oklch(0.72 0.14 75);
+  --accent-amber-soft: oklch(0.94 0.07 75);
+  --accent-red: oklch(0.65 0.14 25);
+  --accent-red-soft: oklch(0.94 0.05 25);
+  --accent-blue: oklch(0.62 0.12 240);
+  --accent-blue-soft: oklch(0.94 0.04 240);
+  --font: "Inter", -apple-system, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+  --radius: 4px;
+  --radius-sm: 3px;
+  --shadow-1: 0 1px 2px rgba(28,25,23,0.04);
+  --shadow-2: 0 2px 8px rgba(28,25,23,0.08);
+}
+*, *::before, *::after { box-sizing: border-box; }
+html, body {
+  margin: 0; height: 100%;
+  font-family: var(--font);
+  background: var(--bg); color: var(--ink);
+  font-size: 13px; line-height: 1.45;
+  -webkit-font-smoothing: antialiased;
+}
+button, input, textarea, select { font-family: inherit; font-size: inherit; color: inherit; }
+.mono { font-family: var(--font-mono); font-size: 12px; letter-spacing: -0.01em; }
+.muted { color: var(--muted); }
+
+/* ── App shell ───────────────────────────────── */
+.app { display: grid; grid-template-rows: 44px 1fr; height: 100vh; background: var(--bg); }
+.topbar {
+  display: flex; align-items: center; gap: 10px;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  font-size: 12px;
+}
+.brand {
+  display: flex; align-items: center; gap: 8px;
+  font-weight: 600; font-family: var(--font-mono); letter-spacing: -0.02em;
+}
+.brand-glyph {
+  width: 18px; height: 18px; border-radius: 3px;
+  background: var(--ink);
+  display: grid; place-items: center;
+  color: var(--bg); font-size: 11px;
+}
+.divider-v { width: 1px; height: 20px; background: var(--border); }
+.top-mid { display: flex; align-items: center; gap: 6px; flex: 1; }
+.top-right { display: flex; align-items: center; gap: 8px; }
+.live-pill {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 2px 8px; border-radius: 100px;
+  background: var(--accent-green-soft); color: oklch(0.4 0.1 145);
+  font-size: 11px; font-weight: 500; font-family: var(--font-mono);
+}
+.live-pill .bulb {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--accent-green);
+  animation: pulse 1.6s infinite;
+}
+
+/* ── Layout ──────────────────────────────────── */
+.workspace {
+  display: grid;
+  grid-template-columns: 260px 1fr;
+  overflow: hidden;
+  height: 100%;
+}
+.sidebar {
+  border-right: 1px solid var(--border);
+  background: var(--surface);
+  overflow-y: auto;
+  padding: 8px 0;
+}
+.sidebar-section { padding: 8px 12px; }
+.sidebar-section-label {
+  font-size: 10.5px; letter-spacing: 0.08em;
+  color: var(--muted); text-transform: uppercase;
+  margin-bottom: 6px;
+  display: flex; align-items: center; justify-content: space-between;
+}
+.trace-item {
+  padding: 6px 12px; cursor: pointer;
+  border-left: 2px solid transparent;
+  display: grid; gap: 2px;
+  font-size: 12px;
+  position: relative;
+}
+.trace-item:hover { background: var(--surface-2); }
+.trace-item.is-active { background: var(--surface-2); border-left-color: var(--accent-green); }
+.trace-title { font-weight: 500; }
+.trace-meta {
+  font-family: var(--font-mono); font-size: 10.5px; color: var(--muted);
+  display: flex; gap: 8px;
+}
+.trace-status { width: 6px; height: 6px; border-radius: 50%; display: inline-block; }
+.trace-status.running { background: var(--accent-green); animation: pulse 1.6s infinite; }
+.trace-status.done { background: var(--muted-2); }
+.trace-status.failed { background: var(--accent-red); }
+.trace-delete {
+  position: absolute; top: 6px; right: 6px;
+  padding: 0 5px; line-height: 1;
+  font-size: 13px; color: var(--muted-2);
+  border: 1px solid transparent; background: transparent;
+  border-radius: 3px; opacity: 0; cursor: pointer;
+  transition: opacity 120ms, color 120ms, background 120ms;
+}
+.trace-item:hover .trace-delete, .trace-delete:focus-visible { opacity: 1; }
+.trace-delete:hover { color: var(--accent-red); background: var(--accent-red-soft); }
+@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
+
+.main-area {
+  display: grid;
+  grid-template-columns: 1.4fr 1fr;
+  overflow: hidden;
+}
+.main-area.no-selection { grid-template-columns: 1fr; }
+
+/* ── Panels ──────────────────────────────────── */
+.tree-panel, .detail-panel {
+  display: flex; flex-direction: column;
+  border-right: 1px solid var(--border);
+  overflow: hidden; min-width: 0;
+}
+.detail-panel { border-right: none; }
+.panel-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  min-height: 40px;
+  flex-shrink: 0;
+}
+.panel-title { display: flex; align-items: center; gap: 8px; font-weight: 500; font-size: 12px; }
+.panel-actions { display: flex; align-items: center; gap: 4px; }
+.dot { width: 7px; height: 7px; border-radius: 50%; }
+.dot-running { background: var(--accent-green); animation: pulse 1.6s infinite; }
+.dot-done { background: var(--muted-2); }
+
+/* ── Chips / buttons ─────────────────────────── */
+.chip {
+  background: transparent; border: 1px solid var(--border);
+  border-radius: 3px; padding: 2px 8px;
+  font-size: 11px; font-family: var(--font-mono);
+  color: var(--muted); cursor: pointer;
+}
+.chip:hover { background: var(--surface-2); color: var(--ink); }
+.chip-on { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+.icon-btn {
+  background: transparent; border: 1px solid transparent;
+  padding: 2px 6px; cursor: pointer; color: var(--muted);
+  font-family: var(--font-mono); border-radius: 3px;
+}
+.icon-btn:hover { background: var(--surface-2); color: var(--ink); }
+
+.auto-label {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-family: var(--font-mono); font-size: 11px; color: var(--muted);
+  cursor: pointer;
+}
+.auto-label input { margin: 0; }
+.chip-on { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+
+/* ── Tree ────────────────────────────────────── */
+.tree-body {
+  flex: 1; overflow: auto;
+  background:
+    radial-gradient(circle at 1px 1px, var(--border) 0.6px, transparent 0.7px) 0 0 / 14px 14px,
+    var(--bg);
+}
+.tree-canvas { display: inline-block; }
+.node-glyph { cursor: pointer; }
+.node-glyph circle { transition: filter 0.15s; }
+.node-glyph:hover circle { filter: brightness(0.97); }
+.tree-legend {
+  display: flex; gap: 14px; flex-wrap: wrap;
+  padding: 6px 12px; border-top: 1px solid var(--border);
+  font-size: 10.5px; color: var(--muted); font-family: var(--font-mono);
+  background: var(--surface);
+}
+.tree-legend span { display: inline-flex; align-items: center; gap: 5px; }
+.swatch { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+.swatch-ink { background: var(--ink); }
+.swatch-green { background: var(--accent-green); }
+.swatch-blue { background: var(--accent-blue); }
+.swatch-amber { background: var(--accent-amber); }
+
+/* ── Node detail ─────────────────────────────── */
+.breadcrumb { display: flex; gap: 6px; font-size: 12px; align-items: center; }
+.crumb { font-family: var(--font-mono); font-size: 12px; color: var(--muted); }
+.crumb-active { color: var(--ink); font-weight: 500; }
+.crumb-sep { color: var(--border-strong); }
+.node-summary {
+  display: grid; grid-template-columns: 1fr auto;
+  gap: 12px; padding: 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg);
+}
+.node-summary-main { display: grid; gap: 4px; align-content: start; min-width: 0; }
+.node-id { font-size: 10.5px; color: var(--muted); letter-spacing: 0.05em; text-transform: uppercase; font-family: var(--font-mono); }
+.node-label { font-size: 14px; font-weight: 500; line-height: 1.35; }
+.node-stats {
+  display: grid; grid-template-columns: repeat(2, auto);
+  gap: 3px 16px; font-size: 11px;
+}
+.kv { display: grid; grid-template-columns: minmax(60px, auto) 1fr; gap: 8px; align-items: baseline; }
+.kv-k { color: var(--muted); font-family: var(--font-mono); font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.04em; }
+.kv-v { font-size: 12px; }
+.kv-v.mono { font-family: var(--font-mono); }
+
+.tabs {
+  display: flex;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  padding: 0 12px; gap: 0;
+  flex-shrink: 0;
+}
+.tab {
+  background: transparent; border: none; cursor: pointer;
+  padding: 8px 12px; font-size: 12px;
+  color: var(--muted);
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+}
+.tab:hover { color: var(--ink); }
+.tab-active { color: var(--ink); border-bottom-color: var(--ink); font-weight: 500; }
+
+.tab-body { flex: 1; overflow: auto; padding: 12px; }
+.section-label {
+  font-size: 10.5px; color: var(--muted);
+  text-transform: uppercase; letter-spacing: 0.08em;
+  margin-bottom: 6px;
+}
+.text-block {
+  background: var(--surface); border: 1px solid var(--border);
+  padding: 10px 12px; border-radius: 3px;
+  white-space: pre-wrap; word-break: break-word;
+  font-size: 12px; line-height: 1.55;
+  margin: 0 0 12px;
+}
+.tools-list { display: grid; gap: 6px; margin-bottom: 12px; }
+.tool-row {
+  display: grid; grid-template-columns: 140px 1fr;
+  gap: 12px; padding: 8px 10px;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 3px; font-size: 11.5px; align-items: start;
+}
+.tool-name { color: var(--ink); font-weight: 500; font-family: var(--font-mono); }
+.tool-args { color: var(--muted); font-family: var(--font-mono); font-size: 11px;
+  white-space: pre-wrap; word-break: break-word; }
+
+.role-tag {
+  display: inline-block;
+  font-family: var(--font-mono); font-size: 10px;
+  padding: 1px 6px; border-radius: 2px;
+  text-transform: uppercase; letter-spacing: 0.05em;
+}
+.role-user { background: var(--accent-blue-soft); color: #1e3a8a; }
+.role-assistant { background: var(--accent-green-soft); color: #0f5132; }
+.role-tool, .role-tool_result { background: var(--accent-amber-soft); color: #78350f; }
+.role-system { background: var(--surface-2); color: var(--muted); }
+
+.raw-json {
+  background: var(--surface); padding: 10px 12px; border-radius: 3px;
+  border: 1px solid var(--border);
+  font-size: 11px; line-height: 1.45; margin: 0;
+  white-space: pre-wrap;
+  font-family: var(--font-mono);
+}
+
+.empty {
+  color: var(--muted); padding: 36px 20px; text-align: center;
+  font-size: 12px;
+}
+.empty h2 { font-weight: 500; font-size: 14px; color: var(--ink); margin: 0 0 8px; }
+.empty code {
+  font-family: var(--font-mono); font-size: 11px;
+  background: var(--surface); padding: 2px 6px; border-radius: 3px;
+}
+
+/* ── Modal ───────────────────────────────────── */
+.modal-backdrop {
+  position: fixed; inset: 0; z-index: 100;
+  background: rgba(0,0,0,0.35);
+  display: flex; align-items: center; justify-content: center;
+  animation: fadeIn 120ms ease-out;
+}
+.modal {
+  background: var(--bg); border-radius: 6px;
+  border: 1px solid var(--border-strong);
+  box-shadow: var(--shadow-2);
+  width: 420px; max-width: calc(100vw - 32px);
+  padding: 18px 20px;
+}
+.modal h2 { margin: 0 0 8px; font-size: 14px; font-weight: 600; }
+.modal p { margin: 0 0 6px; color: var(--muted); font-size: 12px; }
+.modal .target { font-family: var(--font-mono); font-size: 11px; color: var(--ink); word-break: break-all; }
+.modal .actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+.btn {
+  padding: 5px 11px; border-radius: 3px; cursor: pointer;
+  font-size: 11.5px; font-weight: 500; border: 1px solid var(--border-strong);
+  background: var(--surface); color: var(--ink);
+}
+.btn:hover { background: var(--surface-2); }
+.btn-danger {
+  background: var(--accent-red); color: #fff; border-color: var(--accent-red);
+}
+.btn-danger:hover { filter: brightness(0.95); }
+@keyframes fadeIn { from { opacity: 0 } to { opacity: 1 } }
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="topbar">
+    <div class="brand">
+      <div class="brand-glyph">⌘</div>
+      <span>traceframe</span>
+    </div>
+    <div class="divider-v"></div>
+    <div class="top-mid">
+      <span class="live-pill"><span class="bulb"></span> live</span>
+      <span class="mono muted" id="status">loading…</span>
+    </div>
+    <div class="top-right">
+      <label class="auto-label"><input type="checkbox" id="auto" checked/> auto-refresh 2s</label>
+      <button class="chip" id="refresh">↻ refresh</button>
+    </div>
+  </div>
+  <div class="workspace">
+    <aside class="sidebar">
+      <div class="sidebar-section">
+        <div class="sidebar-section-label">
+          <span>Recent traces</span>
+          <span class="mono" id="trace-count">0</span>
+        </div>
+        <div id="traces"></div>
+      </div>
+    </aside>
+    <main class="main-area no-selection" id="main">
+      <div class="empty">
+        <h2>Select a trace to inspect.</h2>
+        <p>New Claude Code sessions will appear here as they start. Begin one in any repo; the session's transcript streams to <code>POST /ingest/events</code>.</p>
+      </div>
+    </main>
+  </div>
+</div>
+<script>
+const $ = (id) => document.getElementById(id);
+const SVG_NS = "http://www.w3.org/2000/svg";
+
+let selectedTrace = null;
+let selectedNode = null;
+let currentEvents = [];
+let eventByUuid = new Map();
+let fullEventCache = new Map();
+let compactMode = true;
+let renderedCompactMode = null;  // tracks last-rendered mode for shell reuse
+let originalEventByUuid = null;  // snapshot for mode switching
+let summaryCursor = 0;
+let autoTimer = null;
+let renderedTraceId = null;
+let detailPending = 0;
+
+const escapeHtml = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
+const fmtBytes = (n) => n < 1024 ? n + " B" : (n/1024).toFixed(1) + " KB";
+const fmtTime = (iso) => { try { return new Date(iso).toLocaleTimeString(); } catch { return iso; } };
+const fmtDuration = (ms) => {
+  if (ms < 1000) return ms + "ms";
+  if (ms < 60000) return (ms/1000).toFixed(1) + "s";
+  return Math.floor(ms/60000) + "m " + Math.round((ms%60000)/1000) + "s";
+};
+const fmtTokens = (n) => n >= 1000 ? (n/1000).toFixed(1) + "k" : String(n);
+const shortModel = (m) => !m ? "" : String(m)
+  .replace("claude-", "").replace("anthropic/", "")
+  .replace(/-(\d{8})$/, "");
+
+// ── Trace list ─────────────────────────────────────────────────────────
+
+async function loadTraces() {
+  let res;
+  try { res = await fetch("/traces"); }
+  catch (e) { $("status").textContent = "offline"; return; }
+  if (!res.ok) { $("status").textContent = "error " + res.status; return; }
+  const { traces } = await res.json();
+  traces.sort((a, b) => b.mtime.localeCompare(a.mtime));
+  $("status").textContent = traces.length + " trace" + (traces.length === 1 ? "" : "s");
+  $("trace-count").textContent = traces.length;
+  $("traces").innerHTML = traces.map(t => `
+    <div class="trace-item ${t.traceId === selectedTrace ? "is-active" : ""}" data-id="${escapeHtml(t.traceId)}">
+      <button class="trace-delete" data-del="${escapeHtml(t.traceId)}" title="Delete trace" aria-label="Delete trace">✕</button>
+      <div style="display:flex;align-items:center;gap:6px">
+        <span class="trace-status done"></span>
+        <span class="trace-title">${escapeHtml(t.traceId)}</span>
+      </div>
+      <div class="trace-meta">
+        <span>${escapeHtml(new Date(t.mtime).toLocaleString())}</span>
+        <span>·</span>
+        <span>${fmtBytes(t.bytes)}</span>
+      </div>
+    </div>
+  `).join("");
+  document.querySelectorAll(".trace-item").forEach(el => {
+    el.addEventListener("click", (e) => {
+      if (e.target.closest(".trace-delete")) return;
+      const id = el.dataset.id;
+      if (selectedTrace !== id) { selectedTrace = id; selectedNode = null; }
+      document.querySelectorAll(".trace-item").forEach(x => x.classList.toggle("is-active", x.dataset.id === selectedTrace));
+      loadDetail();
+    });
+  });
+  document.querySelectorAll(".trace-item .trace-delete").forEach(btn => {
+    btn.addEventListener("click", (e) => { e.stopPropagation(); deleteTrace(btn.dataset.del); });
+  });
+}
+
+// ── Delete modal ───────────────────────────────────────────────────────
+
+function confirmDialog({ title, message, target, confirmLabel }) {
+  return new Promise((resolve) => {
+    const backdrop = document.createElement("div");
+    backdrop.className = "modal-backdrop";
+    backdrop.innerHTML = `
+      <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+        <h2 id="modal-title">${escapeHtml(title)}</h2>
+        <p>${escapeHtml(message)}</p>
+        ${target ? `<p class="target">${escapeHtml(target)}</p>` : ""}
+        <div class="actions">
+          <button class="btn" data-act="cancel">Cancel</button>
+          <button class="btn btn-danger" data-act="confirm">${escapeHtml(confirmLabel)}</button>
+        </div>
+      </div>
+    `;
+    const close = (v) => {
+      document.removeEventListener("keydown", onKey);
+      backdrop.remove();
+      resolve(v);
+    };
+    const onKey = (e) => {
+      if (e.key === "Escape") close(false);
+      if (e.key === "Enter") close(true);
+    };
+    backdrop.addEventListener("click", (e) => {
+      if (e.target === backdrop) return close(false);
+      const act = e.target.closest("[data-act]")?.dataset.act;
+      if (act === "cancel") close(false);
+      if (act === "confirm") close(true);
+    });
+    document.addEventListener("keydown", onKey);
+    document.body.appendChild(backdrop);
+    backdrop.querySelector('[data-act="confirm"]').focus();
+  });
+}
+
+async function deleteTrace(id) {
+  const ok = await confirmDialog({
+    title: "Delete trace?",
+    message: "This permanently removes the trace file. This cannot be undone.",
+    target: id,
+    confirmLabel: "Delete",
+  });
+  if (!ok) return;
+  const res = await fetch(`/traces/${encodeURIComponent(id)}`, { method: "DELETE" });
+  if (!res.ok) { alert(`Delete failed: ${res.status}`); return; }
+  if (selectedTrace === id) {
+    selectedTrace = null;
+    selectedNode = null;
+    renderEmpty();
+  }
+  loadTraces();
+}
+
+// ── Node derivation ────────────────────────────────────────────────────
+
+function eventLabel(e) {
+  // Tool-using node: use description or command
+  if (e.toolUses && e.toolUses.length) {
+    // Prefer the first tool's description/command as the label
+    for (const tu of e.toolUses) {
+      if (tu.input?.description) return tu.input.description;
+      if (tu.input?.command) {
+        const cmd = tu.input.command;
+        return cmd.length > 40 ? cmd.slice(0, 37) + "…" : cmd;
+      }
+      if (tu.input?.path) return tu.input.path.split("/").pop() || tu.input.path;
+    }
+    return e.toolUses.map(t => t.name).slice(0, 2).join(", ");
+  }
+  if (e.role === "user") return "user";
+  if (e.role === "assistant") return "assistant";
+  if (e.role === "tool_result" || e.kind === "tool_result") return "tool_result";
+  return e.role || e.kind || "event";
+}
+
+function eventStyle(e) {
+  const role = e.role || e.kind || "";
+  if (e.toolUses && e.toolUses.length) {
+    return { fill: "var(--accent-amber-soft)", stroke: "var(--accent-amber)", text: "var(--ink)" };
+  }
+  if (role === "assistant") return { fill: "var(--accent-green-soft)", stroke: "var(--accent-green)", text: "var(--ink)" };
+  if (role === "user") return { fill: "var(--accent-blue-soft)", stroke: "var(--accent-blue)", text: "var(--ink)" };
+  if (role === "tool_result") return { fill: "var(--accent-amber-soft)", stroke: "var(--accent-amber)", text: "var(--ink)" };
+  if (role === "system") return { fill: "var(--surface-2)", stroke: "var(--border-strong)", text: "var(--muted)" };
+  return { fill: "var(--surface)", stroke: "var(--border-strong)", text: "var(--ink)" };
+}
+
+function buildTree(events) {
+  // Dedup: the same uuid may arrive multiple times (e.g. a SessionStart re-fire
+  // can spawn a duplicate tail worker that re-emits the whole transcript).
+  // Keep the first occurrence per uuid; ignore the rest so children/walks stay linear.
+  const byUuid = new Map();
+  for (const e of events) {
+    if (e.type !== "transcript.line" || !e.uuid) continue;
+    if (!byUuid.has(e.uuid)) byUuid.set(e.uuid, e);
+  }
+  const lines = [...byUuid.values()];
+
+  const children = new Map();
+  const roots = [];
+  for (const e of lines) {
+    if (e.parentUuid && byUuid.has(e.parentUuid)) {
+      if (!children.has(e.parentUuid)) children.set(e.parentUuid, []);
+      children.get(e.parentUuid).push(e.uuid);
+    } else {
+      roots.push(e.uuid);
+    }
+  }
+
+  const depth = new Map();
+  const row = new Map();
+  let cursor = 0;
+  const seenD = new Set();
+  const seenR = new Set();
+  const walkDepth = (uuid, d) => {
+    if (seenD.has(uuid)) return;
+    seenD.add(uuid);
+    depth.set(uuid, d);
+    (children.get(uuid) || []).forEach(c => walkDepth(c, d + 1));
+  };
+  const walkRow = (uuid) => {
+    if (seenR.has(uuid)) return;
+    seenR.add(uuid);
+    const kids = children.get(uuid) || [];
+    if (!kids.length) { row.set(uuid, cursor++); return; }
+    kids.forEach(walkRow);
+    row.set(uuid, (row.get(kids[0]) + row.get(kids[kids.length - 1])) / 2);
+  };
+  roots.forEach(r => { walkDepth(r, 0); walkRow(r); cursor += 0.5; });
+
+  const COL = 168;
+  const ROW_H = 72;
+  const PAD_X = 36;
+  const PAD_Y = 32;
+  const nodes = lines.map(e => ({
+    event: e,
+    uuid: e.uuid,
+    parentUuid: e.parentUuid,
+    x: PAD_X + (depth.get(e.uuid) || 0) * COL,
+    y: PAD_Y + (row.get(e.uuid) || 0) * ROW_H,
+  }));
+  const byNode = new Map(nodes.map(n => [n.uuid, n]));
+  const edges = [];
+  nodes.forEach(n => {
+    if (n.parentUuid && byNode.has(n.parentUuid)) {
+      edges.push({ from: byNode.get(n.parentUuid), to: n });
+    }
+  });
+
+  const maxDepth = nodes.reduce((m, n) => Math.max(m, depth.get(n.uuid) || 0), 0);
+  const maxRow = nodes.reduce((m, n) => Math.max(m, row.get(n.uuid) || 0), 0);
+  return {
+    nodes, edges,
+    width: PAD_X * 2 + (maxDepth + 1) * COL,
+    height: PAD_Y * 2 + (maxRow + 1) * ROW_H,
+  };
+}
+
+// ── SVG rendering ──────────────────────────────────────────────────────
+
+function svgEl(tag, attrs = {}, children = []) {
+  const el = document.createElementNS(SVG_NS, tag);
+  for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, v);
+  children.forEach(c => el.appendChild(c));
+  return el;
+}
+
+function edgePath(e) {
+  const dx = e.to.x - e.from.x;
+  const midX = e.from.x + dx * 0.5;
+  return `M ${e.from.x + 18} ${e.from.y} C ${midX} ${e.from.y}, ${midX} ${e.to.y}, ${e.to.x - 18} ${e.to.y}`;
+}
+
+function edgeKey(e) {
+  return `${e.from.uuid}|${e.to.uuid}`;
+}
+
+function buildEdge(e) {
+  return svgEl("path", {
+    d: edgePath(e), fill: "none", stroke: "var(--border-strong)", "stroke-width": "1",
+    "marker-end": "url(#arrow)", "data-edge": edgeKey(e),
+  });
+}
+
+function buildNode(n) {
+  const g = svgEl("g", {
+    transform: `translate(${n.x}, ${n.y})`,
+    class: "node-glyph" + (selectedNode === n.uuid ? " is-selected" : ""),
+    "data-uuid": n.uuid,
+  });
+  g.style.cursor = "pointer";
+  g.addEventListener("click", () => selectNode(n.uuid));
+
+  if (selectedNode === n.uuid) {
+    g.appendChild(svgEl("circle", {
+      r: "24", fill: "none", stroke: "var(--ink)",
+      "stroke-width": "1.5", "stroke-dasharray": "2 3",
+      class: "selection-ring",
+    }));
+  }
+
+  const style = eventStyle(n.event);
+  g.appendChild(svgEl("circle", {
+    r: "18", fill: style.fill, stroke: style.stroke, "stroke-width": "1",
+  }));
+  const label = eventLabel(n.event);
+  const maxLabel = 14;
+  const short = label.length > maxLabel ? label.slice(0, maxLabel - 1) + "…" : label;
+  const t = svgEl("text", {
+    "text-anchor": "middle", y: "4",
+    "font-size": "10", "font-family": "var(--font-mono)",
+    "font-weight": "500", fill: style.text,
+  });
+  t.textContent = short;
+  if (label.length > maxLabel) {
+    const title = svgEl("title");
+    title.textContent = label;
+    g.appendChild(title);
+  }
+  g.appendChild(t);
+
+  const usage = n.event.usage || {};
+  const tokens = (usage.input_tokens || 0) + (usage.output_tokens || 0);
+  const meta = svgEl("g", { transform: "translate(0, 32)" });
+  if (tokens) {
+    const tk = svgEl("text", {
+      "text-anchor": "middle", "font-size": "9",
+      "font-family": "var(--font-mono)", fill: "var(--muted)",
+    });
+    tk.textContent = fmtTokens(tokens) + " tok";
+    meta.appendChild(tk);
+  }
+  if (n.event.model) {
+    const md = svgEl("text", {
+      "text-anchor": "middle", y: tokens ? "11" : "0",
+      "font-size": "8.5", "font-family": "var(--font-mono)",
+      fill: "var(--muted-2)",
+    });
+    md.textContent = shortModel(n.event.model);
+    meta.appendChild(md);
+  }
+  g.appendChild(meta);
+  return g;
+}
+
+function renderTree(layout) {
+  const svg = svgEl("svg", {
+    width: layout.width, height: layout.height,
+    style: "display:block",
+  });
+  const defs = svgEl("defs");
+  const marker = svgEl("marker", {
+    id: "arrow", viewBox: "0 0 10 10", refX: "8", refY: "5",
+    markerWidth: "6", markerHeight: "6", orient: "auto",
+  });
+  marker.appendChild(svgEl("path", { d: "M0,0 L10,5 L0,10 z", fill: "var(--border-strong)" }));
+  defs.appendChild(marker);
+  const pattern = svgEl("pattern", {
+    id: "grid", width: "16", height: "16", patternUnits: "userSpaceOnUse",
+  });
+  pattern.appendChild(svgEl("circle", { cx: "0.5", cy: "0.5", r: "0.5", fill: "var(--border)" }));
+  defs.appendChild(pattern);
+  svg.appendChild(defs);
+
+  svg.appendChild(svgEl("rect", {
+    width: layout.width, height: layout.height,
+    fill: "url(#grid)", opacity: "0.5", "data-bg": "1",
+  }));
+
+  layout.edges.forEach(e => svg.appendChild(buildEdge(e)));
+  layout.nodes.forEach(n => svg.appendChild(buildNode(n)));
+
+  return svg;
+}
+
+// Diff existing SVG against a new layout: reposition nodes/edges that already
+// exist, append new ones, drop orphans. Avoids tearing down ~1.6k SVG elements
+// per refresh tick when only a handful of new nodes arrived.
+function updateTree(svg, layout) {
+  svg.setAttribute("width", layout.width);
+  svg.setAttribute("height", layout.height);
+  const bg = svg.querySelector('rect[data-bg="1"]');
+  if (bg) {
+    bg.setAttribute("width", layout.width);
+    bg.setAttribute("height", layout.height);
+  }
+
+  const seenNodes = new Set();
+  const existingNodes = new Map();
+  svg.querySelectorAll("g.node-glyph").forEach(g => existingNodes.set(g.getAttribute("data-uuid"), g));
+
+  layout.nodes.forEach(n => {
+    seenNodes.add(n.uuid);
+    const existing = existingNodes.get(n.uuid);
+    if (existing) {
+      existing.setAttribute("transform", `translate(${n.x}, ${n.y})`);
+    } else {
+      svg.appendChild(buildNode(n));
+    }
+  });
+  for (const [uuid, g] of existingNodes) {
+    if (!seenNodes.has(uuid)) g.remove();
+  }
+
+  const seenEdges = new Set();
+  const existingEdges = new Map();
+  svg.querySelectorAll("path[data-edge]").forEach(p => existingEdges.set(p.getAttribute("data-edge"), p));
+
+  layout.edges.forEach(e => {
+    const key = edgeKey(e);
+    seenEdges.add(key);
+    const existing = existingEdges.get(key);
+    if (existing) {
+      existing.setAttribute("d", edgePath(e));
+    } else {
+      // Insert edges before the first node so they stay underneath.
+      const firstNode = svg.querySelector("g.node-glyph");
+      svg.insertBefore(buildEdge(e), firstNode || null);
+    }
+  });
+  for (const [key, p] of existingEdges) {
+    if (!seenEdges.has(key)) p.remove();
+  }
+}
+
+// ── Detail rendering ───────────────────────────────────────────────────
+
+function renderEmpty() {
+  const main = $("main");
+  main.className = "main-area no-selection";
+  main.innerHTML = `
+    <div class="empty">
+      <h2>Select a trace to inspect.</h2>
+      <p>New Claude Code sessions will appear here as they start. Begin one in any repo; the session's transcript streams to <code>POST /ingest/events</code>.</p>
+    </div>
+  `;
+  renderedTraceId = null;
+  summaryCursor = 0;
+  currentEvents = [];
+  eventByUuid = new Map();
+  fullEventCache = new Map();
+}
+
+function resetTraceState() {
+  currentEvents = [];
+  eventByUuid = new Map();
+  originalEventByUuid = null;
+  fullEventCache = new Map();
+  summaryCursor = 0;
+  resetNormalizationState();
+  selectedNode = null;
+}
+
+function selectNode(uuid) {
+  if (selectedNode === uuid) return;
+  const prev = selectedNode;
+  selectedNode = uuid;
+  document.querySelectorAll(".node-glyph").forEach(g => {
+    const u = g.getAttribute("data-uuid");
+    const want = u === uuid;
+    if (g.classList.contains("is-selected") === want) return;
+    g.classList.toggle("is-selected", want);
+    const ring = g.querySelector("circle.selection-ring");
+    if (want && !ring) {
+      const r = document.createElementNS(SVG_NS, "circle");
+      r.setAttribute("r", "24");
+      r.setAttribute("fill", "none");
+      r.setAttribute("stroke", "var(--ink)");
+      r.setAttribute("stroke-width", "1.5");
+      r.setAttribute("stroke-dasharray", "2 3");
+      r.setAttribute("class", "selection-ring");
+      g.insertBefore(r, g.firstChild);
+    } else if (!want && ring) {
+      ring.remove();
+    }
+  });
+  renderDetail();
+}
+
+// ── Compaction ───────────────────────────────────────────
+// Reduces node count by: (1) grouping tool calls per prompt,
+// (2) folding prompt-end metadata into tool groups, (3) filtering
+// low-signal node types (system, attachments, file snapshots),
+// (4) folding user tool_result nodes into parent tool's content.
+const NOISE_ROLES = new Set(["system", "attachment", "file-history-snapshot", "last-prompt"]);
+
+// Detect if a user node is just passing a tool_result back to the LLM,
+// or is a CLI command/caveat that doesn't contribute to the trace.
+function isToolResultNode(e) {
+  if (e.role !== "user") return false;
+  const text = e.textPreview || e.text || "";
+  if (text.startsWith("[tool_result")) return true;
+  if (text.startsWith("<local-command-caveat>")) return true;
+  if (text.startsWith("<command-name>")) return true;
+  if (text.startsWith("<local-command-stdout>")) return true;
+  return false;
+}
+
+function compactEvents(events) {
+  // Filter noise types AND fold user tool_result nodes into their parent.
+  const filtered = events.filter(e => {
+    if (e.type !== "transcript.line") return true;
+    const role = e.role || "";
+    if (NOISE_ROLES.has(role)) return false;
+    // Skip user tool_result nodes — their content will be folded into the parent.
+    if (isToolResultNode(e)) return false;
+    return true;
+  });
+
+  // Index tool_result nodes by parentUuid so we can fold them into tool nodes.
+  const toolResultContent = new Map(); // parentUuid -> text
+  for (const e of events) {
+    if (isToolResultNode(e) && e.parentUuid) {
+      const text = e.textPreview || e.text || "";
+      const existing = toolResultContent.get(e.parentUuid) || "";
+      toolResultContent.set(e.parentUuid, existing + (existing && text ? "\n" : "") + text);
+    }
+  }
+
+  // Fold tool_result content into matching tool nodes.
+  const withOutput = filtered.map(e => {
+    if (!e.toolUses || !e.toolUses.length) return e;
+    const output = toolResultContent.get(e.uuid);
+    if (!output) return e;
+    return { ...e, _toolOutput: output };
+  });
+
+  const out = [];
+  let currentTools = [];
+  let currentPromptEnd = null;
+
+  function flushTools() {
+    if (!currentTools.length) return;
+    if (currentTools.length === 1) {
+      const t = currentTools[0];
+      if (currentPromptEnd) {
+        t.textPreview = (t.textPreview ? t.textPreview + "\n" : "") + (currentPromptEnd.textPreview || "");
+        t.usage = { ...(t.usage || {}), ...(currentPromptEnd.usage || {}) };
+        t._promptEnd = currentPromptEnd;
+      }
+      out.push(t);
+    } else {
+      const first = currentTools[0];
+      const toolNames = currentTools.flatMap(t => (t.toolUses || []).map(x => x.name));
+      const counts = {};
+      toolNames.forEach(n => { counts[n] = (counts[n] || 0) + 1; });
+      const label = Object.entries(counts)
+        .map(([name, count]) => count > 1 ? `${count}× ${name}` : name)
+        .join(", ");
+      const totalDur = currentTools.reduce((s, t) => s + (t.duration || 0), 0);
+      const allToolUses = currentTools.flatMap(t => t.toolUses || []);
+      // Collect folded outputs
+      const foldedOutputs = currentTools.filter(t => t._toolOutput).map(t => ({ name: (t.toolUses||[])[0]?.name || "tool", output: t._toolOutput }));
+
+      let mergedText = `${currentTools.length} tools: ${label}`;
+      if (currentPromptEnd?.textPreview) mergedText += "\n" + currentPromptEnd.textPreview;
+
+      out.push({
+        ...first,
+        uuid: first.uuid,
+        textPreview: mergedText,
+        textLength: mergedText.length,
+        toolUses: allToolUses,
+        duration: totalDur,
+        usage: currentPromptEnd ? { ...(currentPromptEnd.usage || {}) } : (first.usage || {}),
+        _toolGroup: currentTools,
+        _foldedOutputs: foldedOutputs.length ? foldedOutputs : undefined,
+        _promptEnd: currentPromptEnd,
+      });
+    }
+    currentTools = [];
+    currentPromptEnd = null;
+  }
+
+  for (const e of withOutput) {
+    if (e.type !== "transcript.line") { out.push(e); continue; }
+    const role = e.role || "";
+    if (role === "user" && !e.toolUses) {
+      flushTools();
+      out.push(e);
+    } else if (e.toolUses && e.toolUses.length) {
+      currentTools.push(e);
+    } else if (role === "assistant" && !e.toolUses) {
+      currentPromptEnd = e;
+    } else {
+      flushTools();
+      out.push(e);
+    }
+  }
+  flushTools();
+  return out;
+}
+
+function renderTrace() {
+  const main = $("main");
+  const started = currentEvents.find(e => e.type === "trace.started");
+  const closed = currentEvents.find(e => e.type === "trace.closed");
+  const rawLines = currentEvents.filter(e => e.type === "transcript.line");
+  const isRunning = !closed;
+
+  const sameTrace = renderedTraceId === selectedTrace;
+  const sameMode = renderedCompactMode === compactMode;
+  const reuseShell = sameTrace && sameMode && main.querySelector(".tree-panel");
+
+  if (!reuseShell) {
+    main.className = "main-area";
+    main.innerHTML = `
+      <section class="tree-panel">
+        <div class="panel-header">
+          <div class="panel-title">
+            <span class="dot ${isRunning ? "dot-running" : "dot-done"}" id="tree-status-dot"></span>
+            <span>Call tree</span>
+            <span class="muted" style="margin-left:8px" id="tree-meta"></span>
+          </div>
+          <div class="panel-actions">
+            <span class="chip ${compactMode ? 'chip-on' : ''}" id="compact-chip">⊞ compact</span>
+            <span class="chip" id="trace-title-chip"></span>
+          </div>
+        </div>
+        <div class="tree-body" id="tree-body"></div>
+        <div class="tree-legend">
+          <span><span class="swatch swatch-blue"></span> user</span>
+          <span><span class="swatch swatch-green"></span> assistant</span>
+          <span><span class="swatch swatch-amber"></span> tool</span>
+        </div>
+      </section>
+      <section class="detail-panel" id="detail-panel"></section>
+    `;
+  }
+
+  // Resolve event list for layout, reconciling eventByUuid for the chosen mode.
+  let eventsForLayout;
+  if (compactMode) {
+    if (!originalEventByUuid) originalEventByUuid = new Map(eventByUuid);
+    const compacted = compactEvents(currentEvents);
+    eventByUuid.clear();
+    for (const e of compacted) if (e.uuid) eventByUuid.set(e.uuid, e);
+    eventsForLayout = compacted;
+  } else {
+    if (originalEventByUuid) eventByUuid = new Map(originalEventByUuid);
+    eventsForLayout = currentEvents;
+  }
+
+  const layout = buildTree(eventsForLayout);
+  const nodeCount = layout.nodes.length;
+  const reducedHint = (compactMode && rawLines.length !== nodeCount) ? ` (was ${rawLines.length})` : "";
+
+  $("tree-meta").textContent = `${nodeCount} node${nodeCount === 1 ? "" : "s"}${reducedHint} · ${isRunning ? "running" : "done"}`;
+  const dot = $("tree-status-dot");
+  if (dot) dot.className = "dot " + (isRunning ? "dot-running" : "dot-done");
+  const titleChip = $("trace-title-chip");
+  titleChip.textContent = started?.trace?.title || selectedTrace;
+
+  const body = $("tree-body");
+  let canvas = body.querySelector(".tree-canvas");
+  let svg = canvas ? canvas.querySelector("svg") : null;
+
+  if (!nodeCount) {
+    body.innerHTML = `<div class="empty"><p>No transcript lines yet. Waiting for events…</p></div>`;
+  } else if (svg && reuseShell) {
+    canvas.style.width = layout.width + "px";
+    canvas.style.height = layout.height + "px";
+    updateTree(svg, layout);
+  } else {
+    body.innerHTML = "";
+    const wrap = document.createElement("div");
+    wrap.className = "tree-canvas";
+    wrap.style.width = layout.width + "px";
+    wrap.style.height = layout.height + "px";
+    wrap.appendChild(renderTree(layout));
+    body.appendChild(wrap);
+  }
+
+  renderDetail();
+  renderedTraceId = selectedTrace;
+  renderedCompactMode = compactMode;
+}
+
+function renderDetail() {
+  const panel = $("detail-panel");
+  if (!panel) return;
+  if (!selectedNode) {
+    panel.innerHTML = `<div class="empty"><p>Select a node in the call tree to inspect its content.</p></div>`;
+    return;
+  }
+
+  // Look up event — may be in compacted set or original set.
+  let ev = eventByUuid.get(selectedNode);
+  if (!ev || ev.type !== "transcript.line") {
+    panel.innerHTML = `<div class="empty"><p>Node not found.</p></div>`;
+    return;
+  }
+
+  // Resolve parent from whichever set has it.
+  const parent = ev.parentUuid ? eventByUuid.get(ev.parentUuid) : null;
+  const role = ev.role || ev.kind || "event";
+  const usage = ev.usage || {};
+  const tools = (ev.toolUses || []);
+  const labelText = (ev.textPreview || "").slice(0, 160) || eventLabel(ev);
+  const isToolGroup = ev._toolGroup && ev._toolGroup.length > 0;
+
+  panel.innerHTML = `
+    <div class="panel-header">
+      <div class="panel-title">
+        <span class="breadcrumb">
+          ${parent ? `<span class="crumb">${escapeHtml(eventLabel(parent))}</span><span class="crumb-sep">›</span>` : ""}
+          <span class="crumb crumb-active">${escapeHtml(eventLabel(ev))}</span>
+        </span>
+      </div>
+      <div class="panel-actions">
+        <span class="role-tag role-${escapeHtml(isToolGroup ? "tool" : role)}">${escapeHtml(isToolGroup ? `group · ${ev._toolGroup.length}` : role)}</span>
+      </div>
+    </div>
+    <div class="node-summary">
+      <div class="node-summary-main">
+        <div class="node-id">${escapeHtml(ev.uuid || "")}</div>
+        <div class="node-label">${escapeHtml(labelText)}</div>
+      </div>
+      <div class="node-stats">
+        ${ev.duration != null ? `<div class="kv"><div class="kv-k">duration</div><div class="kv-v mono">${fmtDuration(ev.duration)}</div></div>` : ""}
+        ${ev.model ? `<div class="kv"><div class="kv-k">model</div><div class="kv-v mono">${escapeHtml(shortModel(ev.model))}</div></div>` : ""}
+        ${usage.input_tokens != null ? `<div class="kv"><div class="kv-k">tokens in</div><div class="kv-v mono">${usage.input_tokens.toLocaleString()}</div></div>` : ""}
+        ${usage.output_tokens != null ? `<div class="kv"><div class="kv-k">tokens out</div><div class="kv-v mono">${usage.output_tokens.toLocaleString()}</div></div>` : ""}
+        ${usage.cache_read_input_tokens ? `<div class="kv"><div class="kv-k">cache rd</div><div class="kv-v mono">${usage.cache_read_input_tokens.toLocaleString()}</div></div>` : ""}
+        ${ev.at ? `<div class="kv"><div class="kv-k">time</div><div class="kv-v mono">${escapeHtml(fmtTime(ev.at))}</div></div>` : ""}
+      </div>
+    </div>
+    <div class="tabs">
+      <button class="tab tab-active" data-tab="content">Content</button>
+      ${tools.length ? `<button class="tab" data-tab="tools">Tools · ${tools.length}</button>` : ""}
+      <button class="tab" data-tab="raw">Raw</button>
+    </div>
+    <div class="tab-body" id="detail-body" data-tab="content">
+      ${renderTab("content", ev)}
+    </div>
+  `;
+  hydrateTab("content", ev);
+
+  panel.querySelectorAll(".tab").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const tab = btn.dataset.tab;
+      panel.querySelectorAll(".tab").forEach(b => b.classList.toggle("tab-active", b === btn));
+      const body = $("detail-body");
+      body.dataset.tab = tab;
+      body.innerHTML = renderTab(tab, ev);
+      hydrateTab(tab, ev);
+    });
+  });
+}
+
+function hydrateTab(which, ev) {
+  if (which !== "content" && which !== "raw") return;
+  const full = fullEventCache.get(ev.uuid);
+  if (full) return;
+  // Only fetch if content is truncated or raw is requested.
+  const needsFull = which === "raw" ||
+    (which === "content" && ev.textLength != null && ev.textLength > (ev.textPreview?.length || 0));
+  if (!needsFull) return;
+  const token = ++detailPending;
+  ensureFullEvent(ev.uuid).then(() => {
+    if (token !== detailPending) return;
+    if (selectedNode !== ev.uuid) return;
+    const body = $("detail-body");
+    if (!body || body.dataset.tab !== which) return;
+    body.innerHTML = renderTab(which, ev);
+  });
+}
+
+function renderTab(which, ev) {
+  const full = fullEventCache.get(ev.uuid);
+  if (which === "tools") {
+    // Tool group: show each original tool with its details
+    if (ev._toolGroup && ev._toolGroup.length) {
+      return `
+        <div class="section-label">Tool group — ${ev._toolGroup.length} calls</div>
+        <div class="tools-list">
+          ${ev._toolGroup.map(t => {
+            const tu = t.toolUses || [];
+            const args = tu.map(x => JSON.stringify(x.input ?? {}, null, 2)).join("\n");
+            const output = t._toolOutput || "";
+            return `
+              <div class="tool-row">
+                <div class="tool-name">${escapeHtml(tu[0]?.name || "tool")}</div>
+                <div class="tool-args">${args ? `<div class="tool-args">${escapeHtml(args)}</div>` : ""}${t.duration ? `<span class="muted">${fmtDuration(t.duration)}</span>` : ""}${t.isError ? `<span style="color:var(--accent-red)"> · error</span>` : ""}${output ? `<details style="margin-top:6px"><summary style="cursor:pointer;font-size:10px;color:var(--muted);font-family:var(--font-mono)">output (${output.length} chars)</summary><div class="text-block" style="margin:4px 0 0">${escapeHtml(output.slice(0, 2000))}</div></details>` : ""}</div>
+              </div>
+            `;
+          }).join("")}
+        </div>
+      `;
+    }
+    // Single tool node: show tool input + folded output
+    const tools = (full?.toolUses) || ev.toolUses || [];
+    const output = ev._toolOutput || "";
+    if (!tools.length && !output) return `<div class="empty-small muted">No tool calls on this event.</div>`;
+    return `
+      <div class="section-label">Tool calls</div>
+      <div class="tools-list">
+        ${tools.map(t => `
+          <div class="tool-row">
+            <div class="tool-name">${escapeHtml(t.name || "")}</div>
+            <div class="tool-args">${escapeHtml(JSON.stringify(t.input ?? {}, null, 2))}</div>
+          </div>
+        `).join("")}
+      </div>
+      ${output ? `<div class="section-label" style="margin-top:12px">Tool output</div><div class="text-block">${escapeHtml(output.slice(0, 4000))}</div>` : ""}
+    `;
+  }
+  if (which === "raw") {
+    if (!full) return `<div class="empty-small muted">Loading raw event…</div>`;
+    return `<pre class="raw-json">${escapeHtml(JSON.stringify(full.raw ?? full, null, 2))}</pre>`;
+  }
+  // content
+  const hasMore = ev.textLength != null && ev.textLength > (ev.textPreview?.length || 0);
+  const text = full?.text ?? ev.textPreview ?? "";
+  const loading = hasMore && !full;
+  // For tool nodes with folded output, show it in Content too
+  const foldedOutput = ev._toolOutput || "";
+  return `
+    <div class="section-label">Text${loading ? " <span class=\"muted\">· loading full…</span>" : ""}</div>
+    ${text ? `<div class="text-block">${escapeHtml(text)}</div>` : (foldedOutput ? `<div class="empty-small muted">No text — see Tools tab for output.</div>` : `<div class="empty-small muted">No text content.</div>`)}
+    ${ev._foldedOutputs && ev._foldedOutputs.length ? `
+      <div class="section-label" style="margin-top:12px">Tool outputs</div>
+      ${ev._foldedOutputs.map(o => `
+        <details style="margin-bottom:6px">
+          <summary style="cursor:pointer;font-size:11px;font-family:var(--font-mono);color:var(--muted)">${escapeHtml(o.name)} output (${o.output.length} chars)</summary>
+          <div class="text-block" style="margin:4px 0 0">${escapeHtml(o.output.slice(0, 3000))}</div>
+        </details>
+      `).join("")}
+    ` : ""}
+    ${foldedOutput ? `<div class="section-label" style="margin-top:12px">Tool output</div><div class="text-block">${escapeHtml(foldedOutput.slice(0, 4000))}</div>` : ""}
+  `;
+}
+
+// ── Event normalization ────────────────────────────────────────────────
+// The dashboard renders one shape (Claude Code: trace.started / transcript.line
+// / trace.closed with uuid + parentUuid). Pi extensions emit two other shapes:
+//
+//   1. traceframe-bridge (global, ~/.pi/agent/extensions/traceframe-bridge)
+//      — node/trace_start/trace_end with an explicit tree (node.id, node.parent)
+//
+//   2. traceframe (project-local, .pi/extensions/traceframe.ts)
+//      — flat timeline: session.start, prompt.start, tool.call, tool.result,
+//        prompt.end, session.end. Tree is synthesized by threading prompts
+//        and hanging tools under their prompt.
+//
+// normalizeEvent() either returns a single line-shaped event, or null to
+// signal "merged/skip" (used for tool.result which folds into tool.call).
+const ROLE_BY_KIND = { plan: "user", llm: "assistant", tool: "assistant", experiment: "assistant" };
+
+// Threading state for flat event streams. Reset on trace switch.
+let lastPromptUuid = null;    // most recent prompt.start — parent for tool.call + prompt.end
+let lastTurnEndUuid = null;   // most recent prompt.end — parent for next prompt.start
+
+function resetNormalizationState() {
+  lastPromptUuid = null;
+  lastTurnEndUuid = null;
+}
+
+function normalizeEvent(e) {
+  if (!e || typeof e !== "object") return e;
+
+  // ── Claude Code native — pass through ──
+  if (e.type === "trace.started" || e.type === "trace.closed" || e.type === "transcript.line") {
+    return e;
+  }
+
+  // ── Bridge envelopes ──
+  if (e.type === "trace_start") {
+    return { type: "trace.started", trace: e.trace, _raw: e };
+  }
+  if (e.type === "trace_end") {
+    return { type: "trace.closed", duration: e.duration, _raw: e };
+  }
+
+  // ── Bridge nodes (explicit tree) ──
+  if (e.type === "node") {
+    const n = e.node || {};
+    const role = ROLE_BY_KIND[n.kind] || "assistant";
+    const text = n.output || n.input || n.summary || "";
+    const toolCalls = Array.isArray(n.toolCalls) ? n.toolCalls : [];
+    const toolUses = toolCalls.length
+      ? toolCalls.map((tc, i) => ({
+          id: `${n.id}-tc${i}`,
+          name: tc.name || n.label || "tool",
+          input: tc.args ?? {},
+        }))
+      : undefined;
+    return {
+      type: "transcript.line",
+      uuid: n.id,
+      parentUuid: n.parent || null,
+      role,
+      textPreview: text,
+      textLength: text.length,
+      toolUses,
+      at: n.timestamp,
+      model: n.model,
+      usage: {
+        input_tokens: n.inputTokens || 0,
+        output_tokens: n.outputTokens || 0,
+      },
+      _raw: e,
+    };
+  }
+
+  // ── Project-local pi extension (flat timeline → synthesized tree) ──
+  if (e.type === "session.start") {
+    return {
+      type: "trace.started",
+      trace: {
+        title: `pi ${e.reason || "session"}`,
+        repo: e.cwd || "",
+        branch: "",
+        status: "running",
+        startedAt: e.timestamp,
+      },
+      _raw: e,
+    };
+  }
+  if (e.type === "session.end") {
+    return { type: "trace.closed", _raw: e };
+  }
+  if (e.type === "prompt.start") {
+    const uuid = `prompt-${e.timestamp}`;
+    const text = e.prompt || "";
+    const out = {
+      type: "transcript.line",
+      uuid,
+      parentUuid: lastTurnEndUuid,
+      role: "user",
+      textPreview: text,
+      textLength: text.length,
+      at: e.timestamp,
+      _raw: e,
+    };
+    lastPromptUuid = uuid;
+    return out;
+  }
+  if (e.type === "tool.call") {
+    const uuid = `tool-${e.toolCallId}`;
+    const toolInput = {};
+    if (e.command != null) toolInput.command = e.command;
+    if (e.path != null) toolInput.path = e.path;
+    if (e.timeout != null) toolInput.timeout = e.timeout;
+    const summary = e.command || e.path || "";
+    return {
+      type: "transcript.line",
+      uuid,
+      parentUuid: lastPromptUuid,
+      role: "assistant",
+      textPreview: summary,
+      textLength: summary.length,
+      toolUses: [{ id: e.toolCallId, name: e.toolName, input: toolInput }],
+      at: e.timestamp,
+      _raw: e,
+    };
+  }
+  if (e.type === "tool.result") {
+    // Merge result into the matching tool.call node (pair by toolCallId).
+    const uuid = `tool-${e.toolCallId}`;
+    const existing = eventByUuid.get(uuid);
+    if (existing) {
+      const out = e.outputPreview || "";
+      existing.textPreview = out;
+      existing.textLength = out.length;
+      if (e.duration != null) existing.duration = e.duration;
+      if (e.isError) existing.isError = true;
+      // Keep both call and result accessible under the Raw tab.
+      const pair = { call: existing._raw, result: e };
+      existing._raw = pair;
+      fullEventCache.set(uuid, pair);
+    }
+    return null;
+  }
+  if (e.type === "prompt.end") {
+    const uuid = `prompt-end-${e.timestamp}`;
+    const toolCount = e.toolCalls || 0;
+    const tokens = (e.input || 0) + (e.output || 0);
+    const text = toolCount
+      ? `${toolCount} tool call${toolCount === 1 ? "" : "s"}${(e.tools || []).length ? ": " + (e.tools || []).join(", ") : ""}`
+      : tokens ? `response · ${tokens} tok` : "response";
+    const out = {
+      type: "transcript.line",
+      uuid,
+      parentUuid: lastPromptUuid,
+      role: "assistant",
+      textPreview: text,
+      textLength: text.length,
+      at: e.timestamp,
+      usage: {
+        input_tokens: e.input || 0,
+        output_tokens: e.output || 0,
+        cache_read_input_tokens: e.cache_read || 0,
+      },
+      _raw: e,
+    };
+    lastTurnEndUuid = uuid;
+    return out;
+  }
+
+  return e;
+}
+
+// ── Load & refresh ─────────────────────────────────────────────────────
+
+async function loadDetail() {
+  if (!selectedTrace) { renderEmpty(); return; }
+  const sameTrace = renderedTraceId === selectedTrace;
+  if (!sameTrace) resetTraceState();
+
+  let res;
+  try {
+    res = await fetch(`/traces/${encodeURIComponent(selectedTrace)}/summary?since=${summaryCursor}`);
+  } catch { renderEmpty(); return; }
+  if (!res.ok) {
+    $("main").className = "main-area no-selection";
+    $("main").innerHTML = `<div class="empty"><p>error ${res.status}</p></div>`;
+    renderedTraceId = null;
+    return;
+  }
+  const { events, cursor } = await res.json();
+  let added = 0;
+  for (const raw of events || []) {
+    const e = normalizeEvent(raw);
+    // null means "merged into an existing node" (e.g. tool.result → tool.call).
+    if (e == null) continue;
+    // Dedup duplicate emissions (multiple tail workers re-shipping the same lines).
+    if (e.uuid && eventByUuid.has(e.uuid)) continue;
+    if ((e.type === "trace.started" || e.type === "trace.closed") &&
+        currentEvents.some(x => x.type === e.type)) continue;
+    currentEvents.push(e);
+    added++;
+    if (e.uuid) {
+      eventByUuid.set(e.uuid, e);
+      // Synthetic/bridge events ship their full payload in the summary;
+      // pre-seed fullEventCache so the Raw tab doesn't have to hit
+      // /traces/:id/events/:uuid (which looks up by raw->>'uuid' and would
+      // miss — their id lives under node.id or is derived from toolCallId).
+      if (e._raw) fullEventCache.set(e.uuid, e._raw);
+    }
+  }
+  summaryCursor = typeof cursor === "number" ? cursor : summaryCursor;
+
+  if (sameTrace && added === 0) return;
+  renderTrace();
+}
+
+async function ensureFullEvent(uuid) {
+  if (fullEventCache.has(uuid)) return fullEventCache.get(uuid);
+  const traceId = selectedTrace;
+  let res;
+  try {
+    res = await fetch(`/traces/${encodeURIComponent(traceId)}/events/${encodeURIComponent(uuid)}`);
+  } catch { return null; }
+  if (!res.ok) return null;
+  const { event } = await res.json();
+  if (traceId !== selectedTrace) return null;
+  fullEventCache.set(uuid, event);
+  return event;
+}
+
+$("refresh").addEventListener("click", () => { loadTraces(); loadDetail(); });
+$("auto").addEventListener("change", (e) => { if (e.target.checked) startAuto(); else stopAuto(); });
+
+document.addEventListener("click", (e) => {
+  if (e.target.closest("#compact-chip")) {
+    compactMode = !compactMode;
+    const chip = document.getElementById("compact-chip");
+    if (chip) chip.className = "chip" + (compactMode ? " chip-on" : "");
+    if (selectedTrace) renderTrace();
+  }
+});
+function startAuto() {
+  stopAuto();
+  autoTimer = setInterval(() => { loadTraces(); if (selectedTrace) loadDetail(); }, 2000);
+}
+function stopAuto() { if (autoTimer) { clearInterval(autoTimer); autoTimer = null; } }
+
+loadTraces();
+startAuto();
+</script>
+</body>
+</html>

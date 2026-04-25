@@ -1,0 +1,212 @@
+{
+  "main": {
+    "id": "886101f285504230",
+    "type": "split",
+    "children": [
+      {
+        "id": "b592178ae2b5bb97",
+        "type": "tabs",
+        "children": [
+          {
+            "id": "2a1433ce09ff44c5",
+            "type": "leaf",
+            "state": {
+              "type": "graph",
+              "state": {},
+              "icon": "lucide-git-fork",
+              "title": "Graph view"
+            }
+          }
+        ]
+      }
+    ],
+    "direction": "vertical"
+  },
+  "left": {
+    "id": "990def0f49c2f028",
+    "type": "split",
+    "children": [
+      {
+        "id": "012664ab9cba17a9",
+        "type": "tabs",
+        "children": [
+          {
+            "id": "d7cedf88c468f81f",
+            "type": "leaf",
+            "state": {
+              "type": "file-explorer",
+              "state": {
+                "sortOrder": "alphabetical",
+                "autoReveal": false
+              },
+              "icon": "lucide-folder-closed",
+              "title": "Files"
+            }
+          },
+          {
+            "id": "214a26f78c691080",
+            "type": "leaf",
+            "state": {
+              "type": "search",
+              "state": {
+                "query": "",
+                "matchingCase": false,
+                "explainSearch": false,
+                "collapseAll": false,
+                "extraContext": false,
+                "sortOrder": "alphabetical"
+              },
+              "icon": "lucide-search",
+              "title": "Search"
+            }
+          },
+          {
+            "id": "81746573b263a35e",
+            "type": "leaf",
+            "state": {
+              "type": "bookmarks",
+              "state": {},
+              "icon": "lucide-bookmark",
+              "title": "Bookmarks"
+            }
+          }
+        ]
+      }
+    ],
+    "direction": "horizontal",
+    "width": 300
+  },
+  "right": {
+    "id": "dc2997ed03043442",
+    "type": "split",
+    "children": [
+      {
+        "id": "60b7c8d9c146e4bb",
+        "type": "tabs",
+        "children": [
+          {
+            "id": "6b82a9822e86967e",
+            "type": "leaf",
+            "state": {
+              "type": "backlink",
+              "state": {
+                "collapseAll": false,
+                "extraContext": false,
+                "sortOrder": "alphabetical",
+                "showSearch": false,
+                "searchQuery": "",
+                "backlinkCollapsed": false,
+                "unlinkedCollapsed": true
+              },
+              "icon": "links-coming-in",
+              "title": "Backlinks"
+            }
+          },
+          {
+            "id": "58a706f67f6c05ef",
+            "type": "leaf",
+            "state": {
+              "type": "outgoing-link",
+              "state": {
+                "linksCollapsed": false,
+                "unlinkedCollapsed": true
+              },
+              "icon": "links-going-out",
+              "title": "Outgoing links"
+            }
+          },
+          {
+            "id": "4b0b23f066fe67d1",
+            "type": "leaf",
+            "state": {
+              "type": "tag",
+              "state": {
+                "sortOrder": "frequency",
+                "useHierarchy": true,
+                "showSearch": false,
+                "searchQuery": ""
+              },
+              "icon": "lucide-tags",
+              "title": "Tags"
+            }
+          },
+          {
+            "id": "24925fcde20935b1",
+            "type": "leaf",
+            "state": {
+              "type": "all-properties",
+              "state": {
+                "sortOrder": "frequency",
+                "showSearch": false,
+                "searchQuery": ""
+              },
+              "icon": "lucide-archive",
+              "title": "All properties"
+            }
+          },
+          {
+            "id": "c6631c333b32221a",
+            "type": "leaf",
+            "state": {
+              "type": "outline",
+              "state": {
+                "followCursor": false,
+                "showSearch": false,
+                "searchQuery": ""
+              },
+              "icon": "lucide-list",
+              "title": "Outline"
+            }
+          }
+        ]
+      }
+    ],
+    "direction": "horizontal",
+    "width": 300,
+    "collapsed": true
+  },
+  "left-ribbon": {
+    "hiddenItems": {
+      "switcher:Open quick switcher": false,
+      "graph:Open graph view": false,
+      "canvas:Create new canvas": false,
+      "daily-notes:Open today's daily note": false,
+      "templates:Insert template": false,
+      "command-palette:Open command palette": false,
+      "bases:Create new base": false
+    }
+  },
+  "active": "2a1433ce09ff44c5",
+  "lastOpenFiles": [
+    "wiki/concepts/_index.md",
+    "bin/trace-event.mjs",
+    "bin/trace.mjs",
+    "ingest/package-lock.json",
+    "ingest/node_modules/pg-protocol/src/types/chunky.d.ts",
+    "ingest/node_modules/pg-protocol/src/testing/test-buffers.ts",
+    "ingest/node_modules/pg-protocol/src/testing/buffer-list.ts",
+    "ingest/node_modules/pg/lib/crypto/utils.js",
+    "ingest/node_modules/pg/lib/crypto/utils-webcrypto.js",
+    "ingest/node_modules/pg/lib/crypto/utils-legacy.js",
+    "ingest/node_modules/pg/lib/crypto/sasl.js",
+    "ingest/node_modules/xtend/README.md",
+    "ingest/node_modules/split2/README.md",
+    "ingest/node_modules/postgres-interval/readme.md",
+    "ingest/node_modules/postgres-date/readme.md",
+    "ingest/node_modules/postgres-bytea/readme.md",
+    "ingest/node_modules/postgres-array/readme.md",
+    "ingest/node_modules/pgpass/README.md",
+    "ingest/node_modules/pg-types/README.md",
+    "ingest/node_modules/pg-pool/README.md",
+    "ingest/node_modules/pg-int8/README.md",
+    "ingest/node_modules/pg-protocol/README.md",
+    "ingest/node_modules/pg-connection-string/README.md",
+    "ingest/node_modules/pg-cloudflare/README.md",
+    "ingest/node_modules/pg/README.md",
+    "Concepts Index.md",
+    "wiki/index.md",
+    "wiki/overview.md",
+    "docs/superpowers/specs/2026-04-21-traceframe-data-model-design.md",
+    "CLAUDE.md"
+  ]
+}

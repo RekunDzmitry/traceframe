@@ -1,0 +1,45 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: traceframe-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-traceframe}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-traceframe}
+      POSTGRES_DB: ${POSTGRES_DB:-traceframe}
+    ports:
+      - "5434:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./ingest/init.sql:/docker-entrypoint-initdb.d/01-init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-traceframe} -d ${POSTGRES_DB:-traceframe}"]
+      interval: 5s
+      timeout: 2s
+      retries: 5
+
+  ingest:
+    build: ./ingest
+    container_name: traceframe-ingest
+    restart: unless-stopped
+    ports:
+      - "4000:4000"
+    environment:
+      TRACEFRAME_API_KEY: ${TRACEFRAME_API_KEY}
+      PORT: 4000
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: ${POSTGRES_USER:-traceframe}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-traceframe}
+      POSTGRES_DB: ${POSTGRES_DB:-traceframe}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:4000/healthz"]
+      interval: 10s
+      timeout: 2s
+      retries: 3
+
+volumes:
+  pgdata:

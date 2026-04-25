@@ -1,0 +1,790 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<title>traceframe — data model</title>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet"/>
+<style>
+:root {
+  --bg: #fafaf9;
+  --surface: #f5f5f4;
+  --surface-2: #ecebe9;
+  --border: #e7e5e4;
+  --border-strong: #d6d3d1;
+  --ink: #1c1917;
+  --ink-2: #292524;
+  --muted: #78716c;
+  --muted-2: #a8a29e;
+  --accent-green: oklch(0.62 0.14 145);
+  --accent-green-soft: oklch(0.92 0.05 145);
+  --accent-amber: oklch(0.62 0.14 75);
+  --accent-amber-soft: oklch(0.94 0.06 75);
+  --accent-red: oklch(0.55 0.14 25);
+  --accent-red-soft: oklch(0.94 0.04 25);
+  --accent-blue: oklch(0.55 0.12 245);
+  --accent-blue-soft: oklch(0.94 0.04 245);
+  --font-sans: "Inter", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+  --radius: 4px;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; background: var(--bg); color: var(--ink); font-family: var(--font-sans); font-size: 13.5px; line-height: 1.55; }
+body { padding: 0; }
+
+.topbar {
+  position: sticky; top: 0; z-index: 10;
+  display: flex; align-items: center; gap: 12px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  padding: 10px 20px;
+  font-size: 12.5px;
+}
+.brand { display: flex; align-items: center; gap: 8px; font-weight: 600; letter-spacing: -0.01em; }
+.brand-glyph {
+  width: 22px; height: 22px; border-radius: var(--radius);
+  background: var(--ink); color: var(--bg);
+  display: grid; place-items: center; font-size: 13px;
+}
+.crumb { color: var(--muted); font-family: var(--font-mono); font-size: 11.5px; }
+.crumb-sep { color: var(--muted-2); }
+.top-right { margin-left: auto; display: flex; align-items: center; gap: 10px; color: var(--muted); font-family: var(--font-mono); font-size: 11.5px; }
+.chip {
+  border: 1px solid var(--border-strong); background: var(--bg);
+  padding: 3px 8px; border-radius: 3px; font-family: var(--font-mono); font-size: 11px; color: var(--muted);
+}
+
+.layout { display: grid; grid-template-columns: 240px minmax(0, 1fr); gap: 0; }
+.toc {
+  position: sticky; top: 43px; align-self: start;
+  max-height: calc(100vh - 43px);
+  overflow-y: auto;
+  border-right: 1px solid var(--border);
+  padding: 16px 10px 24px 20px;
+  background: var(--bg);
+}
+.toc-label { font-family: var(--font-mono); font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); margin: 0 0 10px 6px; }
+.toc a { display: block; padding: 3px 8px; color: var(--ink-2); text-decoration: none; border-radius: 3px; font-size: 12.5px; }
+.toc a:hover { background: var(--surface); color: var(--ink); }
+.toc a.sub { padding-left: 20px; color: var(--muted); font-size: 12px; }
+.toc a.active { background: var(--surface-2); color: var(--ink); font-weight: 500; }
+
+.content { max-width: 880px; padding: 28px 40px 80px 40px; }
+
+h1 { font-size: 22px; font-weight: 600; letter-spacing: -0.015em; margin: 0 0 4px; }
+.subtitle { color: var(--muted); font-family: var(--font-mono); font-size: 12px; margin-bottom: 28px; }
+h2 {
+  font-size: 16.5px; font-weight: 600; letter-spacing: -0.01em;
+  margin: 36px 0 10px; padding-top: 8px;
+  border-top: 1px solid var(--border);
+  padding-top: 20px;
+  scroll-margin-top: 60px;
+}
+h2:first-of-type { border-top: 0; padding-top: 0; }
+h3 {
+  font-size: 14px; font-weight: 600; margin: 22px 0 8px;
+  font-family: var(--font-mono); color: var(--ink-2);
+  scroll-margin-top: 60px;
+}
+h4 { font-size: 13px; font-weight: 600; margin: 14px 0 6px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; font-size: 11px; }
+
+p { margin: 8px 0; }
+ul, ol { margin: 8px 0; padding-left: 22px; }
+li { margin: 3px 0; }
+
+code {
+  font-family: var(--font-mono); font-size: 12.5px;
+  background: var(--surface-2); border: 1px solid var(--border);
+  padding: 1px 5px; border-radius: 3px;
+  color: var(--ink-2);
+}
+pre {
+  font-family: var(--font-mono); font-size: 12px; line-height: 1.55;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px 14px; overflow-x: auto;
+  margin: 10px 0;
+}
+pre code { background: none; border: 0; padding: 0; color: var(--ink-2); }
+
+.kw   { color: oklch(0.45 0.14 280); font-weight: 500; }
+.type { color: oklch(0.42 0.12 200); }
+.str  { color: oklch(0.45 0.14 145); }
+.num  { color: oklch(0.48 0.14 25); }
+.com  { color: var(--muted); font-style: italic; }
+.prop { color: var(--ink-2); }
+
+blockquote {
+  margin: 10px 0; padding: 8px 14px;
+  border-left: 3px solid var(--accent-amber);
+  background: var(--accent-amber-soft);
+  color: var(--ink-2);
+  border-radius: 0 var(--radius) var(--radius) 0;
+}
+
+table {
+  width: 100%; border-collapse: collapse; margin: 12px 0;
+  font-size: 12.5px;
+}
+th, td {
+  text-align: left; padding: 7px 10px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+th {
+  background: var(--surface); font-weight: 600;
+  font-family: var(--font-mono); font-size: 11.5px;
+  text-transform: uppercase; letter-spacing: 0.04em;
+  color: var(--muted);
+}
+td code { font-size: 12px; }
+
+.callout {
+  border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 10px 14px; margin: 12px 0; background: var(--surface);
+  font-size: 12.5px;
+}
+.callout-label {
+  font-family: var(--font-mono); font-size: 11px; text-transform: uppercase;
+  letter-spacing: 0.05em; color: var(--muted);
+  margin-bottom: 4px;
+}
+
+.badge {
+  display: inline-block; font-family: var(--font-mono); font-size: 10.5px;
+  padding: 1px 6px; border-radius: 3px;
+  border: 1px solid var(--border-strong);
+  margin-right: 4px;
+  color: var(--muted);
+  background: var(--bg);
+}
+.badge-ui       { color: var(--accent-blue); background: var(--accent-blue-soft); border-color: transparent; }
+.badge-derived  { color: var(--accent-amber); background: var(--accent-amber-soft); border-color: transparent; }
+.badge-required { color: var(--accent-green); background: var(--accent-green-soft); border-color: transparent; }
+
+.fk-map {
+  font-family: var(--font-mono); font-size: 12px; white-space: pre;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 12px 14px; overflow-x: auto;
+  color: var(--ink-2);
+}
+
+hr { border: 0; border-top: 1px solid var(--border); margin: 28px 0; }
+
+.footer {
+  margin-top: 56px; padding-top: 16px; border-top: 1px solid var(--border);
+  color: var(--muted); font-family: var(--font-mono); font-size: 11.5px;
+}
+a.anchor {
+  opacity: 0; margin-left: 6px; color: var(--muted-2); text-decoration: none;
+  font-family: var(--font-mono); font-size: 11px;
+  transition: opacity 0.15s;
+}
+h2:hover a.anchor, h3:hover a.anchor { opacity: 1; }
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand"><div class="brand-glyph">⌘</div><span>traceframe</span></div>
+  <span class="crumb-sep">/</span>
+  <span class="crumb">docs / specs / data-model</span>
+  <div class="top-right">
+    <span>2026-04-21</span>
+    <span class="crumb-sep">·</span>
+    <span class="chip">draft</span>
+  </div>
+</header>
+
+<div class="layout">
+
+<nav class="toc">
+  <div class="toc-label">Contents</div>
+  <a href="#conventions">Conventions</a>
+  <a href="#s1">§1 Trace graph</a>
+  <a href="#s1-1" class="sub">1.1 Trace</a>
+  <a href="#s1-2" class="sub">1.2 Node</a>
+  <a href="#s1-3" class="sub">1.3 Decision</a>
+  <a href="#s1-4" class="sub">1.4 ToolCall</a>
+  <a href="#s1-5" class="sub">1.5 Branching model</a>
+  <a href="#s2">§2 Branch experiment</a>
+  <a href="#s2-1" class="sub">2.1 Spec</a>
+  <a href="#s2-2" class="sub">2.2 ContextMessage</a>
+  <a href="#s2-3" class="sub">2.3 ModelCatalog</a>
+  <a href="#s2-4" class="sub">2.4 Provider adapters</a>
+  <a href="#s2-5" class="sub">2.5 SavedExperiment</a>
+  <a href="#s3">§3 Wiki</a>
+  <a href="#s3-1" class="sub">3.1 WikiPage</a>
+  <a href="#s3-2" class="sub">3.2 Markdown dialect</a>
+  <a href="#s3-3" class="sub">3.3 Derived</a>
+  <a href="#s4">§4 Code graph</a>
+  <a href="#s4-1" class="sub">4.1 CodeSymbol</a>
+  <a href="#s4-2" class="sub">4.2 CodeEdge</a>
+  <a href="#s4-3" class="sub">4.3 Symbol rename lineage</a>
+  <a href="#s4-4" class="sub">4.4 Derived</a>
+  <a href="#s5">§5 Cross-entity</a>
+  <a href="#s6">§6 Enums</a>
+  <a href="#s7">§7 Non-goals</a>
+  <a href="#s8">§8 Example</a>
+  <a href="#s9">§9 Decisions log</a>
+</nav>
+
+<main class="content">
+
+<h1>traceframe — data model</h1>
+<div class="subtitle">Draft · extracted from the HTML prototype (observability.html / data.js / wiki.jsx)</div>
+
+<p><strong>Purpose.</strong> Formalize the entities the prototype already renders so a real backend / schema / API can be built against them without re-deriving shape from mock JS.</p>
+
+<h2 id="conventions">Conventions <a href="#conventions" class="anchor">#</a></h2>
+<ul>
+  <li>Type definitions are TypeScript-flavored. Treat them as the canonical contract; a concrete implementation may translate to SQL, Protobuf, Pydantic, Zod, etc.</li>
+  <li><code>ISOTimestamp</code> = RFC 3339 string, always UTC. The prototype stores <code>"14:22:08"</code> as a display string — the real model stores full UTC and lets the UI format.</li>
+  <li><code>Millis</code> = integer milliseconds. <code>USD</code> = number.</li>
+  <li>Fields tagged <span class="badge badge-ui">ui</span> are presentation-only; a real producer may omit them.</li>
+  <li>Fields tagged <span class="badge badge-derived">derived</span> are computed at read time (backlinks, siblings, ancestor chain). Do not store.</li>
+</ul>
+
+<!-- ─────────── §1 ─────────── -->
+<h2 id="s1">§1 Trace graph <a href="#s1" class="anchor">#</a></h2>
+<p>The core entity: a <code>Trace</code> is a rooted DAG of <code>Node</code>s representing an agent run, plus alternate branches explored either by the agent (different model) or by a human (experiment from the inline branch panel).</p>
+
+<h3 id="s1-1">1.1 Trace <a href="#s1-1" class="anchor">#</a></h3>
+<pre><code><span class="kw">interface</span> <span class="type">Trace</span> {
+  <span class="prop">id</span>:          <span class="type">TraceId</span>;        <span class="com">// "trc_9f2a" — opaque, stable</span>
+  <span class="prop">title</span>:       <span class="type">string</span>;         <span class="com">// "Fix: login redirect loop on SSO"</span>
+  <span class="prop">repo</span>:        <span class="type">string</span>;         <span class="com">// "acme/web"</span>
+  <span class="prop">branch</span>:      <span class="type">string</span>;         <span class="com">// git branch this run targeted</span>
+  <span class="prop">startedAt</span>:   <span class="type">ISOTimestamp</span>;
+  <span class="prop">duration</span>:    <span class="type">Millis</span>;         <span class="com">// wall-clock; freeze at last event for `running` traces</span>
+  <span class="prop">totalTokens</span>: <span class="type">number</span>;         <span class="com">// sum over all nodes, branches included</span>
+  <span class="prop">totalCost</span>:   <span class="type">USD</span>;
+  <span class="prop">status</span>:      <span class="type">TraceStatus</span>;
+}
+
+<span class="kw">type</span> <span class="type">TraceId</span>     = <span class="type">string</span>;     <span class="com">// "trc_" + 4+ hex chars</span>
+<span class="kw">type</span> <span class="type">TraceStatus</span> = <span class="str">"running"</span> | <span class="str">"done"</span> | <span class="str">"failed"</span>;</code></pre>
+
+<div class="callout">
+  <div class="callout-label">Invariants</div>
+  <ul>
+    <li><code>totalTokens</code> / <code>totalCost</code> MUST equal the sum over owned nodes. Denormalized for cheap list rendering; recompute on write.</li>
+    <li>For <code>status: "running"</code>, <code>duration</code> is monotone — UI may display a live ticker.</li>
+  </ul>
+</div>
+
+<h3 id="s1-2">1.2 Node <a href="#s1-2" class="anchor">#</a></h3>
+<p>Every LLM step, tool call, plan step, or branch experiment is a <code>Node</code>. Nodes form a tree via <code>parent</code>. Multiple nodes may share a <code>parent</code> — those are sibling branches (visible in the tree side-by-side).</p>
+
+<pre><code><span class="kw">interface</span> <span class="type">Node</span> {
+  <span class="prop">id</span>:       <span class="type">NodeId</span>;         <span class="com">// trace-local, e.g. "n1", "n4a"</span>
+  <span class="prop">traceId</span>:  <span class="type">TraceId</span>;        <span class="com">// not in prototype's mock; add for storage</span>
+  <span class="prop">parent</span>:   <span class="type">NodeId</span> | <span class="kw">null</span>;  <span class="com">// null only for the root of the main line</span>
+  <span class="prop">kind</span>:     <span class="type">NodeKind</span>;
+  <span class="prop">label</span>:    <span class="type">string</span>;         <span class="com">// short tag shown on the node chip</span>
+  <span class="prop">summary</span>:  <span class="type">string</span>;         <span class="com">// one-line description for the detail header</span>
+
+  <span class="com">// Execution</span>
+  <span class="prop">model</span>:    <span class="type">ModelId</span>;
+  <span class="prop">provider</span>: <span class="type">Provider</span>;       <span class="com">// cached from model for filters</span>
+  <span class="prop">tools</span>:    <span class="type">ToolName</span>[];     <span class="com">// tools invoked from this node</span>
+  <span class="prop">files</span>:    <span class="type">FilePath</span>[];     <span class="com">// files touched by this node</span>
+
+  <span class="com">// Telemetry</span>
+  <span class="prop">inputTokens</span>:  <span class="type">number</span>;
+  <span class="prop">outputTokens</span>: <span class="type">number</span>;
+  <span class="prop">cost</span>:         <span class="type">USD</span>;       <span class="com">// billed cost for this node only</span>
+  <span class="prop">latency</span>:      <span class="type">Millis</span>;    <span class="com">// end-to-end</span>
+  <span class="prop">ttft</span>:         <span class="type">Millis</span>;    <span class="com">// time-to-first-token</span>
+  <span class="prop">status</span>:       <span class="type">NodeStatus</span>;
+  <span class="prop">timestamp</span>:    <span class="type">ISOTimestamp</span>;
+
+  <span class="com">// LLM payload</span>
+  <span class="prop">input</span>:      <span class="type">string</span>;         <span class="com">// full rendered input (system + user + tool_results)</span>
+  <span class="prop">output</span>:     <span class="type">string</span>;         <span class="com">// assistant response text</span>
+  <span class="prop">toolCalls</span>:  <span class="type">ToolCall</span>[];
+  <span class="prop">decision</span>:   <span class="type">Decision</span>;       <span class="com">// the flagship reasoning surface</span>
+
+  <span class="com">// Branch metadata (present only for alt branches)</span>
+  <span class="prop">isBranch</span>?:    <span class="type">boolean</span>;
+  <span class="prop">branchLabel</span>?: <span class="type">string</span>;       <span class="com">// "another model", "new approach"</span>
+  <span class="prop">branchKind</span>?:  <span class="type">BranchKind</span>;
+
+  <span class="com">// UI hints</span>
+  <span class="prop">highlighted</span>?: <span class="type">boolean</span>;      <span class="com">// ui — pulse the node in the tree</span>
+}
+
+<span class="kw">type</span> <span class="type">NodeKind</span>    = <span class="str">"plan"</span> | <span class="str">"tool"</span> | <span class="str">"llm"</span> | <span class="str">"experiment"</span>;
+<span class="kw">type</span> <span class="type">NodeStatus</span>  = <span class="str">"ok"</span> | <span class="str">"error"</span> | <span class="str">"running"</span> | <span class="str">"skipped"</span>;
+<span class="kw">type</span> <span class="type">Provider</span>    = <span class="str">"anthropic"</span> | <span class="str">"openai"</span> | <span class="str">"google"</span> | <span class="str">"meta"</span> | <span class="type">string</span>;
+<span class="kw">type</span> <span class="type">ModelId</span>     = <span class="type">string</span>;
+<span class="kw">type</span> <span class="type">ToolName</span>    = <span class="type">string</span>;    <span class="com">// search_fs, read_file, edit_file, run_tests, …</span>
+<span class="kw">type</span> <span class="type">FilePath</span>    = <span class="type">string</span>;    <span class="com">// repo-relative POSIX path</span></code></pre>
+
+<h4>NodeKind interpretation</h4>
+<table>
+<thead><tr><th>kind</th><th>meaning</th><th>example</th></tr></thead>
+<tbody>
+<tr><td><code>plan</code></td><td>LLM step producing a plan; no tool calls.</td><td>n1</td></tr>
+<tr><td><code>tool</code></td><td>Node whose primary action was a tool call. <code>toolCalls.length ≥ 1</code>.</td><td>n2, n3, n5, n6</td></tr>
+<tr><td><code>llm</code></td><td>Reasoning step; may also call tools. Distinction from <code>tool</code> is authorial.</td><td>n4, n4a</td></tr>
+<tr><td><code>experiment</code></td><td>Human-initiated branch from the inline panel. Always <code>isBranch: true</code>.</td><td>n4b</td></tr>
+</tbody>
+</table>
+
+<div class="callout">
+  <div class="callout-label">Invariants</div>
+  <ul>
+    <li><code>parent</code> must reference an existing <code>Node.id</code> in the same trace, or be <code>null</code>.</li>
+    <li>Exactly one node per trace has <code>parent: null</code>.</li>
+    <li>If <code>kind === "tool"</code>, then <code>toolCalls.length ≥ 1</code>.</li>
+    <li><code>isBranch === true</code> ⇒ <code>parent !== null</code>.</li>
+  </ul>
+</div>
+
+<h4>Derived at read time <span class="badge badge-derived">derived</span></h4>
+<pre><code><span class="kw">interface</span> <span class="type">NodeDerived</span> {
+  <span class="prop">children</span>:      <span class="type">NodeId</span>[];   <span class="com">// nodes whose parent === this.id</span>
+  <span class="prop">siblings</span>:      <span class="type">NodeId</span>[];   <span class="com">// share this.parent, excluding this</span>
+  <span class="prop">ancestorChain</span>: <span class="type">NodeId</span>[];   <span class="com">// root → this (used by the branch panel to build context)</span>
+  <span class="prop">depth</span>:         <span class="type">number</span>;
+}</code></pre>
+
+<h3 id="s1-3">1.3 Decision <a href="#s1-3" class="anchor">#</a></h3>
+<p>The centerpiece of the prototype. Every node has one. Answers <em>what did the LLM choose and why</em> in a structured way so a human can audit reasoning without reading the full transcript.</p>
+
+<pre><code><span class="kw">interface</span> <span class="type">Decision</span> {
+  <span class="prop">goal</span>:    <span class="type">string</span>;             <span class="com">// what this node was trying to accomplish</span>
+  <span class="prop">options</span>: <span class="type">DecisionOption</span>[];   <span class="com">// considered alternatives</span>
+  <span class="prop">why</span>:     <span class="type">string</span>;             <span class="com">// tie-break rationale</span>
+}
+
+<span class="kw">interface</span> <span class="type">DecisionOption</span> {
+  <span class="prop">label</span>:  <span class="type">string</span>;
+  <span class="prop">chosen</span>: <span class="type">boolean</span>;            <span class="com">// exactly one option is chosen</span>
+  <span class="prop">reason</span>: <span class="type">string</span>;
+}</code></pre>
+
+<div class="callout">
+  <div class="callout-label">Invariants</div>
+  <ul><li><code>options.length ≥ 1</code></li><li>Exactly one <code>option.chosen === true</code></li></ul>
+</div>
+
+<p class="callout">
+  <span class="callout-label">UI note</span>
+  The detail panel renders three tabs — <strong>Structured</strong> (goal → options → chosen → why), <strong>Annotated</strong> (<code>input</code>/<code>output</code> with red/green highlights on bug signal vs. decision), <strong>Diff</strong> (diff of <code>input</code> vs parent's <code>output</code>). All three read the same <code>Decision</code> + <code>input</code>/<code>output</code>; no extra storage.
+</p>
+
+<h3 id="s1-4">1.4 ToolCall <a href="#s1-4" class="anchor">#</a></h3>
+<pre><code><span class="kw">interface</span> <span class="type">ToolCall</span> {
+  <span class="prop">name</span>:       <span class="type">ToolName</span>;
+  <span class="prop">args</span>:       <span class="type">Record</span>&lt;<span class="type">string</span>, <span class="kw">unknown</span>&gt;;
+  <span class="prop">result</span>:     <span class="type">string</span>;         <span class="com">// return summary (truncated)</span>
+  <span class="prop">resultRef</span>?: <span class="type">BlobRef</span>;        <span class="com">// pointer to full result in blob storage</span>
+  <span class="prop">latency</span>?:   <span class="type">Millis</span>;
+  <span class="prop">status</span>?:    <span class="type">NodeStatus</span>;
+}
+
+<span class="kw">interface</span> <span class="type">BlobRef</span> {
+  <span class="prop">uri</span>:         <span class="type">string</span>;    <span class="com">// "s3://traceframe/trc_9f2a/n3/read_file.txt"</span>
+  <span class="prop">bytes</span>:       <span class="type">number</span>;
+  <span class="prop">contentType</span>: <span class="type">string</span>;
+}</code></pre>
+
+<h3 id="s1-5">1.5 Branching model <a href="#s1-5" class="anchor">#</a></h3>
+<p>Two kinds of alt branches, both represented as extra <code>Node</code>s with a shared <code>parent</code>:</p>
+<pre><code><span class="kw">type</span> <span class="type">BranchKind</span> =
+  | <span class="str">"alt-model"</span>     <span class="com">// agent-internal: same prompt, different model (n4a)</span>
+  | <span class="str">"experiment"</span>;   <span class="com">// human-initiated from the branch panel (n4b)</span></code></pre>
+<ul>
+  <li><code>alt-model</code> branches are created by the agent's runtime and have <code>kind: "llm" | "tool" | "plan"</code>.</li>
+  <li><code>experiment</code> branches are user-initiated and always have <code>kind: "experiment"</code>.</li>
+  <li>Both set <code>isBranch: true</code> and populate <code>branchLabel</code>.</li>
+  <li>A branch's children can grow into a full subtree — no structural difference from the main line.</li>
+</ul>
+<div class="callout">
+  <div class="callout-label">Sibling semantics (resolved)</div>
+  When a user branches from node <code>N</code>, the new node is created as a <strong>sibling</strong> of <code>N</code>, not a child: <code>newNode.parent = N.parent</code>. "Branching from n4" means "try a different n4", not "try something after n4". Matches the prototype (<code>n4b.parent === n3</code>).
+</div>
+
+<!-- ─────────── §2 ─────────── -->
+<h2 id="s2">§2 Branch experiment <a href="#s2" class="anchor">#</a></h2>
+<p>The inline panel on a selected node lets the user re-run the step with a different model / prompt / context. When submitted, it produces a new <code>Node</code> (usually with <code>branchKind: "experiment"</code>) rooted at the source node's <code>parent</code>.</p>
+
+<h3 id="s2-1">2.1 BranchExperimentSpec — runtime payload <a href="#s2-1" class="anchor">#</a></h3>
+<pre><code><span class="kw">interface</span> <span class="type">BranchExperimentSpec</span> {
+  <span class="prop">sourceNodeId</span>: <span class="type">NodeId</span>;      <span class="com">// new node's parent = sourceNode.parent (sibling)</span>
+  <span class="prop">traceId</span>:      <span class="type">TraceId</span>;
+
+  <span class="com">// Model config</span>
+  <span class="prop">model</span>:           <span class="type">ModelId</span>;
+  <span class="prop">provider</span>:        <span class="type">Provider</span>;
+  <span class="prop">temperature</span>:     <span class="type">number</span>;      <span class="com">// [0, 2] typical</span>
+  <span class="prop">topP</span>:            <span class="type">number</span>;      <span class="com">// (0, 1]</span>
+  <span class="prop">maxOutputTokens</span>?: <span class="type">number</span>;
+
+  <span class="com">// Prompt</span>
+  <span class="prop">userMessage</span>: <span class="type">string</span>;          <span class="com">// the task to re-try</span>
+
+  <span class="com">// Context — built from sourceNode's ancestor chain, then user-edited</span>
+  <span class="prop">context</span>: <span class="type">ContextMessage</span>[];
+
+  <span class="com">// Informational live estimates; recompute server-side</span>
+  <span class="prop">estInputTokens</span>?:  <span class="type">number</span>;
+  <span class="prop">estOutputTokens</span>?: <span class="type">number</span>;
+  <span class="prop">estCost</span>?:         <span class="type">USD</span>;
+}</code></pre>
+
+<h3 id="s2-2">2.2 ContextMessage <a href="#s2-2" class="anchor">#</a></h3>
+<p>Each message the LLM will see. <code>buildContextChain(node)</code> constructs it from the ancestor chain:</p>
+<ol>
+  <li>One <code>system</code> message (root system prompt).</li>
+  <li>For each ancestor node in root→current order:
+    <ul>
+      <li>Any <code>&lt;user&gt;…&lt;/user&gt;</code> blocks in <code>node.input</code> become <code>user</code> messages.</li>
+      <li>Each <code>node.toolCalls[i]</code> becomes a <code>tool_result</code> message: <code>"${name}(${args}) → ${result}"</code>.</li>
+      <li><code>node.output</code> becomes an <code>assistant</code> message (skip for the branched-from node — that output is what we're re-generating).</li>
+    </ul>
+  </li>
+</ol>
+<pre><code><span class="com">// Persisted shape — lives in BranchExperimentSpec.context and goes to the provider</span>
+<span class="kw">interface</span> <span class="type">ContextMessage</span> {
+  <span class="prop">role</span>:    <span class="type">Role</span>;
+  <span class="prop">content</span>: <span class="type">string</span>;
+  <span class="prop">source</span>:  <span class="type">NodeId</span> | <span class="str">"system"</span>;   <span class="com">// attribution in the UI</span>
+}
+
+<span class="com">// UI superset — never serialized. The panel strips these before submit.</span>
+<span class="kw">interface</span> <span class="type">ContextMessageUI</span> <span class="kw">extends</span> <span class="type">ContextMessage</span> {
+  <span class="prop">enabled</span>:   <span class="type">boolean</span>;             <span class="com">// ui — toggle without deleting</span>
+  <span class="prop">collapsed</span>: <span class="type">boolean</span>;             <span class="com">// ui — fold/unfold in the panel</span>
+}
+
+<span class="kw">type</span> <span class="type">Role</span> = <span class="str">"system"</span> | <span class="str">"user"</span> | <span class="str">"tool_result"</span> | <span class="str">"assistant"</span>;</code></pre>
+<div class="callout">
+  <div class="callout-label">Invariants</div>
+  <ul>
+    <li><code>role === "system"</code> typically appears once at the start; the model doesn't forbid multiple.</li>
+    <li><code>source === "system"</code> only for the root system prompt; every other message's <code>source</code> is a real <code>NodeId</code>.</li>
+    <li><code>enabled</code> and <code>collapsed</code> MUST NOT be persisted. Disabled messages are filtered out before the spec is written or sent; collapsed state is session-local.</li>
+  </ul>
+</div>
+
+<h3 id="s2-3">2.3 ModelCatalog <a href="#s2-3" class="anchor">#</a></h3>
+<p>Needed to compute cost estimates live. The prototype inlines this in <code>branch.jsx</code>; production stores server-side.</p>
+<pre><code><span class="kw">interface</span> <span class="type">ModelEntry</span> {
+  <span class="prop">id</span>:                <span class="type">ModelId</span>;
+  <span class="prop">provider</span>:          <span class="type">Provider</span>;
+  <span class="prop">inputCostPerMTok</span>:  <span class="type">USD</span>;       <span class="com">// e.g. 3 = $3 per million input tokens</span>
+  <span class="prop">outputCostPerMTok</span>: <span class="type">USD</span>;
+  <span class="prop">contextWindow</span>?:    <span class="type">number</span>;    <span class="com">// tokens</span>
+  <span class="prop">capabilities</span>?:     <span class="type">string</span>[];  <span class="com">// "tool-use", "vision", …</span>
+}</code></pre>
+
+<h3 id="s2-4">2.4 Provider adapters <a href="#s2-4" class="anchor">#</a></h3>
+<p>The canonical data model (<code>ContextMessage</code> + <code>BranchExperimentSpec</code>) is <strong>provider-agnostic</strong>. Translation to a provider's native request shape happens in a thin adapter at the HTTP boundary — not in storage, not in the UI.</p>
+<pre><code><span class="kw">interface</span> <span class="type">ProviderAdapter</span> {
+  <span class="prop">provider</span>: <span class="type">Provider</span>;
+  <span class="prop">toRequest</span>(<span class="prop">spec</span>: <span class="type">BranchExperimentSpec</span>, <span class="prop">catalog</span>: <span class="type">ModelEntry</span>): <span class="type">ProviderRequest</span>;
+  <span class="prop">fromResponse</span>(<span class="prop">raw</span>: <span class="kw">unknown</span>): <span class="type">NodePartial</span>;     <span class="com">// what to persist on the resulting Node</span>
+}</code></pre>
+<p>Adapter responsibilities:</p>
+<ul>
+  <li>Map our unified <code>Role</code> to native roles. E.g., <code>tool_result</code> → OpenAI <code>{role: "tool"}</code> vs. Anthropic <code>{role: "user", content: [{type: "tool_result", …}]}</code>.</li>
+  <li>Fold <code>temperature</code>, <code>topP</code>, <code>maxOutputTokens</code> into the native params object.</li>
+  <li>Handle streaming → non-streaming reassembly (for persistent <code>Node.output</code>).</li>
+  <li>Normalize token-usage and cost fields back to our units.</li>
+</ul>
+<p><strong>Why this boundary.</strong> Stored <code>ContextMessage</code> stays portable (re-run the same spec against a new provider without rewriting it), the UI renders one shape, and adding a provider is a new adapter — no migration.</p>
+
+<h3 id="s2-5">2.5 SavedExperiment <a href="#s2-5" class="anchor">#</a></h3>
+<p>Sidebar shows "Saved experiments" — named bundles of specs for reuse.</p>
+<pre><code><span class="kw">interface</span> <span class="type">SavedExperiment</span> {
+  <span class="prop">id</span>:        <span class="type">string</span>;                    <span class="com">// "exp_cheap_sweep"</span>
+  <span class="prop">name</span>:      <span class="type">string</span>;                    <span class="com">// "Cheap model sweep"</span>
+  <span class="prop">createdAt</span>: <span class="type">ISOTimestamp</span>;
+  <span class="prop">specs</span>:     <span class="type">BranchExperimentSpec</span>[];     <span class="com">// typically one template × N models</span>
+  <span class="prop">notes</span>?:    <span class="type">string</span>;
+}</code></pre>
+
+<!-- ─────────── §3 ─────────── -->
+<h2 id="s3">§3 Wiki <a href="#s3" class="anchor">#</a></h2>
+<p>Obsidian-style linked notes. Pages keyed by slug; wikilinks <code>[[Page Title]]</code> resolved against the same map at render time.</p>
+
+<h3 id="s3-1">3.1 WikiPage <a href="#s3-1" class="anchor">#</a></h3>
+<pre><code><span class="kw">interface</span> <span class="type">WikiPage</span> {
+  <span class="prop">slug</span>:    <span class="type">WikiSlug</span>;    <span class="com">// map key; used by [[wikilinks]]</span>
+  <span class="prop">title</span>:   <span class="type">string</span>;      <span class="com">// display title (may differ from slug)</span>
+  <span class="prop">tags</span>:    <span class="type">string</span>[];    <span class="com">// "runbook", "p1", "resolved", …</span>
+  <span class="prop">updated</span>: <span class="type">ISODate</span>;     <span class="com">// YYYY-MM-DD</span>
+  <span class="prop">body</span>:    <span class="type">string</span>;      <span class="com">// markdown with [[wikilinks]]</span>
+  <span class="prop">links</span>:   <span class="type">WikiSlug</span>[];  <span class="com">// outgoing — denormalized for fast graph queries</span>
+}
+
+<span class="kw">type</span> <span class="type">WikiSlug</span> = <span class="type">string</span>;  <span class="com">// human-readable: "SSO Proxy"</span>
+<span class="kw">type</span> <span class="type">ISODate</span>  = <span class="type">string</span>;  <span class="com">// "2026-04-20"</span></code></pre>
+<div class="callout">
+  <div class="callout-label">Invariants</div>
+  <ul>
+    <li><code>slug</code> is unique across all pages.</li>
+    <li>Every slug in <code>links</code> must reference an existing page, or render as a dangling wikilink.</li>
+    <li><code>links</code> regenerable from <code>body</code> via <code>/\[\[([^\]]+)\]\]/g</code>; keep as a denormalized index for cheap backlinks.</li>
+  </ul>
+</div>
+
+<h3 id="s3-2">3.2 Markdown dialect <a href="#s3-2" class="anchor">#</a></h3>
+<p>The prototype's <code>renderBody</code> supports a deliberately small subset:</p>
+<ul>
+  <li><code># </code> / <code>## </code> headings</li>
+  <li><code>&gt; </code> blockquotes</li>
+  <li><code>1. </code> ordered list items / <code>- </code> unordered list items</li>
+  <li>Blank lines → paragraph breaks</li>
+  <li>Inline: <code>[[wikilink]]</code> only — no bold/italic/code spans in v1</li>
+</ul>
+<p>Any extension should be documented here before expanding the renderer.</p>
+
+<h3 id="s3-3">3.3 Derived — backlinks &amp; local graph <span class="badge badge-derived">derived</span> <a href="#s3-3" class="anchor">#</a></h3>
+<pre><code><span class="kw">interface</span> <span class="type">WikiDerived</span> {
+  <span class="prop">backlinks</span>:  <span class="type">WikiSlug</span>[];            <span class="com">// p where p.links.includes(this.slug)</span>
+  <span class="prop">localGraph</span>: {
+    <span class="prop">nodes</span>: <span class="type">WikiSlug</span>[];                 <span class="com">// this + 1-hop neighbors</span>
+    <span class="prop">edges</span>: [<span class="type">WikiSlug</span>, <span class="type">WikiSlug</span>][];    <span class="com">// directed, following `links`</span>
+  };
+}</code></pre>
+
+<!-- ─────────── §4 ─────────── -->
+<h2 id="s4">§4 Code graph — AST / semantic model <a href="#s4" class="anchor">#</a></h2>
+<p>Visualization of the codebase as a graph of symbols (modules, functions, constants) connected by typed edges. Traces reference symbols; the code graph and trace graph join on <code>FilePath</code> + symbol id.</p>
+
+<h3 id="s4-1">4.1 CodeSymbol <a href="#s4-1" class="anchor">#</a></h3>
+<pre><code><span class="kw">interface</span> <span class="type">CodeSymbol</span> {
+  <span class="prop">id</span>:        <span class="type">SymbolId</span>;            <span class="com">// unique within a repo; could be a qualified name</span>
+  <span class="prop">kind</span>:      <span class="type">SymbolKind</span>;
+  <span class="prop">label</span>:     <span class="type">string</span>;
+  <span class="prop">parent</span>?:   <span class="type">SymbolId</span>;            <span class="com">// enclosing module (unset for top-level modules)</span>
+
+  <span class="com">// Production additions</span>
+  <span class="prop">file</span>?:      <span class="type">FilePath</span>;
+  <span class="prop">signature</span>?: <span class="type">string</span>;            <span class="com">// for fns/consts; UI shows as code block</span>
+  <span class="prop">line</span>?:      <span class="type">number</span>;
+
+  <span class="com">// Telemetry</span>
+  <span class="prop">hot</span>?:       <span class="type">boolean</span>;            <span class="com">// ui — frequently used / hot path</span>
+  <span class="prop">warn</span>?:      <span class="type">boolean</span>;            <span class="com">// ui — touched by a failing trace / flagged</span>
+
+  <span class="com">// Trace × code join</span>
+  <span class="prop">touchedBy</span>?: <span class="type">TraceTouch</span>[];
+
+  <span class="com">// Identity across renames (see §4.3)</span>
+  <span class="prop">previousIds</span>?: <span class="type">SymbolId</span>[];          <span class="com">// chain of ids this symbol was previously known by</span>
+
+  <span class="com">// Layout hints (ui; a real renderer should run a force layout client-side)</span>
+  <span class="prop">x</span>?: <span class="type">number</span>;                     <span class="com">// ui</span>
+  <span class="prop">y</span>?: <span class="type">number</span>;                     <span class="com">// ui</span>
+}
+
+<span class="kw">interface</span> <span class="type">TraceTouch</span> {
+  <span class="prop">traceId</span>: <span class="type">TraceId</span>;
+  <span class="prop">nodeId</span>:  <span class="type">NodeId</span>;
+  <span class="prop">role</span>:    <span class="str">"main-fix"</span> | <span class="str">"proposed-refactor"</span> | <span class="str">"read"</span> | <span class="str">"edit"</span> | <span class="type">string</span>;
+}
+
+<span class="kw">type</span> <span class="type">SymbolId</span>   = <span class="type">string</span>;   <span class="com">// "setSid", "middleware", "auth.ts"</span>
+<span class="kw">type</span> <span class="type">SymbolKind</span> = <span class="str">"module"</span> | <span class="str">"fn"</span> | <span class="str">"const"</span> | <span class="str">"class"</span> | <span class="str">"type"</span>;</code></pre>
+<div class="callout">
+  <div class="callout-label">Invariants</div>
+  <ul>
+    <li>If <code>kind === "module"</code>, <code>parent</code> is unset (or references a higher-level package/dir).</li>
+    <li>If <code>kind !== "module"</code>, <code>parent</code> references a module (or a class, in future).</li>
+  </ul>
+</div>
+
+<h3 id="s4-2">4.2 CodeEdge <a href="#s4-2" class="anchor">#</a></h3>
+<pre><code><span class="kw">interface</span> <span class="type">CodeEdge</span> {
+  <span class="prop">from</span>: <span class="type">SymbolId</span>;
+  <span class="prop">to</span>:   <span class="type">SymbolId</span>;
+  <span class="prop">kind</span>: <span class="type">EdgeKind</span>;    <span class="com">// "calls" | "uses" | "reads" | …</span>
+  <span class="prop">tag</span>?: <span class="type">EdgeTag</span>;     <span class="com">// overlay: "bug" | "proposed" | null</span>
+}
+
+<span class="kw">type</span> <span class="type">EdgeKind</span> = <span class="str">"calls"</span> | <span class="str">"uses"</span> | <span class="str">"reads"</span> | <span class="str">"extends"</span> | <span class="str">"imports"</span> | <span class="str">"redirect-loop"</span> | <span class="type">string</span>;
+<span class="kw">type</span> <span class="type">EdgeTag</span>  = <span class="str">"bug"</span> | <span class="str">"proposed"</span>;</code></pre>
+<p>The prototype encodes edges as tuples <code>[from, to, kind, tag?]</code>; storage uses the object form for extensibility. <code>tag: "bug"</code> renders red; <code>tag: "proposed"</code> renders dashed amber and ties back to an experiment branch via <code>touchedBy</code>.</p>
+
+<h3 id="s4-3">4.3 Symbol identity across renames <a href="#s4-3" class="anchor">#</a></h3>
+<p>When a symbol is renamed (or moved between files), we allocate a <strong>new <code>SymbolId</code></strong> and record a lineage link. The old id is retained so historical traces still resolve.</p>
+<pre><code><span class="com">// Append-only log — one row per rename event</span>
+<span class="kw">interface</span> <span class="type">SymbolRename</span> {
+  <span class="prop">from</span>:    <span class="type">SymbolId</span>;                   <span class="com">// old id (still resolvable via lookups)</span>
+  <span class="prop">to</span>:      <span class="type">SymbolId</span>;                   <span class="com">// new id</span>
+  <span class="prop">at</span>:      <span class="type">ISOTimestamp</span>;
+  <span class="prop">commit</span>?: <span class="type">string</span>;                     <span class="com">// git sha where the rename landed</span>
+  <span class="prop">reason</span>?: <span class="str">"rename"</span> | <span class="str">"move"</span> | <span class="str">"split"</span> | <span class="str">"merge"</span> | <span class="type">string</span>;
+}</code></pre>
+<p><strong>Resolution rules.</strong></p>
+<ul>
+  <li>Live lookups (tree view, code graph, joins from <code>Node.files</code>) always target the <strong>current</strong> id.</li>
+  <li>Historical references (a <code>TraceTouch</code> written when the symbol still had its old id) resolve via the chain: follow <code>SymbolRename.from → to</code> transitively until you land on a current id.</li>
+  <li><code>CodeSymbol.previousIds</code> caches the chain for O(1) reads; rebuild when renames are appended.</li>
+  <li>On <code>split</code> / <code>merge</code>, the 1-to-1 chain is broken — renderers should surface the lineage diagram rather than silently pick a successor.</li>
+</ul>
+<p><strong>Why this shape.</strong> A single id would force rewriting history on every rename (expensive, destroys audit trail); a pure rename log without <code>previousIds</code> makes every read a graph walk. The combo gives fast reads, accurate history, and a single source of truth for lineage.</p>
+
+<h3 id="s4-4">4.4 Derived — callers / callees <span class="badge badge-derived">derived</span> <a href="#s4-4" class="anchor">#</a></h3>
+<pre><code><span class="kw">interface</span> <span class="type">CodeSymbolDerived</span> {
+  <span class="prop">callers</span>: <span class="type">SymbolId</span>[];   <span class="com">// { e.from | e ∈ edges, e.to === this.id, e.kind === "calls" }</span>
+  <span class="prop">callees</span>: <span class="type">SymbolId</span>[];   <span class="com">// { e.to   | e ∈ edges, e.from === this.id, e.kind === "calls" }</span>
+}</code></pre>
+
+<!-- ─────────── §5 ─────────── -->
+<h2 id="s5">§5 Cross-entity relationships <a href="#s5" class="anchor">#</a></h2>
+<div class="fk-map">Trace  1 ─── *  Node
+Node   *  ─── 1  Node          (parent)
+Node   *  ─── *  FilePath      → CodeSymbol.file
+Node   *  ─── *  SymbolId      → CodeSymbol.touchedBy
+WikiPage.body  ─── embeds      refs like "trc_9f2a" → Trace.id   (string match; no hard FK)
+SavedExperiment.specs[*].sourceNodeId  → Node.id</div>
+<ul>
+  <li>Wiki ↔ Trace is intentionally loose: wiki pages reference trace ids as plain text. Upgrade to a typed link when we add auto-generated incident pages.</li>
+  <li>CodeSymbol ↔ Node is the most valuable join ("which traces touched <code>setSid</code>?"). Keep denormalized on the symbol side for fast reads; rebuild from <code>Node.files</code> + symbol-in-file index on writes.</li>
+</ul>
+
+<!-- ─────────── §6 ─────────── -->
+<h2 id="s6">§6 Enums &amp; open sets <a href="#s6" class="anchor">#</a></h2>
+<table>
+<thead><tr><th>Type</th><th>Values (closed)</th><th>Notes</th></tr></thead>
+<tbody>
+<tr><td><code>TraceStatus</code></td><td><code>running</code> | <code>done</code> | <code>failed</code></td><td>Add <code>queued</code>, <code>canceled</code> when we have a runner.</td></tr>
+<tr><td><code>NodeKind</code></td><td><code>plan</code> | <code>tool</code> | <code>llm</code> | <code>experiment</code></td><td>Authorial intent, not mechanical.</td></tr>
+<tr><td><code>NodeStatus</code></td><td><code>ok</code> | <code>error</code> | <code>running</code> | <code>skipped</code></td><td></td></tr>
+<tr><td><code>Role</code></td><td><code>system</code> | <code>user</code> | <code>tool_result</code> | <code>assistant</code></td><td>Provider-agnostic; map to <code>tool</code>/<code>function</code> at the provider boundary.</td></tr>
+<tr><td><code>BranchKind</code></td><td><code>alt-model</code> | <code>experiment</code></td><td></td></tr>
+<tr><td><code>EdgeTag</code></td><td><code>bug</code> | <code>proposed</code> | <code>null</code></td><td></td></tr>
+</tbody>
+</table>
+<p><strong>Open sets</strong> (free strings, conventions documented):</p>
+<ul>
+  <li><code>Provider</code>: <code>anthropic</code>, <code>openai</code>, <code>google</code>, <code>meta</code> in v1.</li>
+  <li><code>ToolName</code>: <code>search_fs</code>, <code>read_file</code>, <code>edit_file</code>, <code>run_tests</code> in v1 — grow as tools are added.</li>
+  <li><code>SymbolKind</code>, <code>EdgeKind</code>: extensible; unknown values render as generic.</li>
+</ul>
+
+<!-- ─────────── §7 ─────────── -->
+<h2 id="s7">§7 What's NOT in this model (and why) <a href="#s7" class="anchor">#</a></h2>
+<ul>
+  <li><strong>User accounts / auth / org</strong> — prototype is single-user; add when multi-tenancy lands.</li>
+  <li><strong>Real-time streaming deltas</strong> — the prototype renders finished nodes. For live runs, add an append-only <code>NodeEvent</code> log (token deltas, tool-call progress); derive final <code>Node</code> state by folding events.</li>
+  <li><strong>Annotations / human review</strong> — no <code>comments</code> / <code>approvals</code> yet. Design separately when the review workflow lands.</li>
+  <li><strong>Cost budgets / alerts</strong> — sidebar shows 24h aggregates derived from <code>Trace.totalCost</code>; no budget entity.</li>
+  <li><strong>Diffs</strong> — the Diff tab renders on-the-fly from <code>input</code>/<code>output</code>. If we need persistent patches, add a <code>Patch</code> entity linked from <code>Node</code>.</li>
+</ul>
+
+<!-- ─────────── §8 ─────────── -->
+<h2 id="s8">§8 Canonical example <a href="#s8" class="anchor">#</a></h2>
+<p>Mapping the prototype's <code>n4</code> (the "aha" node) to the model:</p>
+<pre><code><span class="kw">const</span> <span class="prop">n4</span>: <span class="type">Node</span> = {
+  <span class="prop">id</span>: <span class="str">"n4"</span>,
+  <span class="prop">traceId</span>: <span class="str">"trc_9f2a"</span>,
+  <span class="prop">parent</span>: <span class="str">"n3"</span>,
+  <span class="prop">kind</span>: <span class="str">"llm"</span>,
+  <span class="prop">label</span>: <span class="str">"analyze callback"</span>,
+  <span class="prop">summary</span>: <span class="str">"Identify bug: callback sets cookie with wrong domain."</span>,
+  <span class="prop">model</span>: <span class="str">"claude-sonnet-4.5"</span>,
+  <span class="prop">provider</span>: <span class="str">"anthropic"</span>,
+  <span class="prop">tools</span>: [<span class="str">"read_file"</span>],
+  <span class="prop">files</span>: [<span class="str">"src/pages/auth/callback.ts"</span>],
+  <span class="prop">inputTokens</span>: <span class="num">3820</span>,
+  <span class="prop">outputTokens</span>: <span class="num">641</span>,
+  <span class="prop">cost</span>: <span class="num">0.021</span>,
+  <span class="prop">latency</span>: <span class="num">3180</span>,
+  <span class="prop">ttft</span>: <span class="num">720</span>,
+  <span class="prop">status</span>: <span class="str">"ok"</span>,
+  <span class="prop">timestamp</span>: <span class="str">"2026-04-20T14:22:17Z"</span>,
+  <span class="prop">highlighted</span>: <span class="kw">true</span>,
+  <span class="prop">input</span>: <span class="str">"&lt;tool_result&gt;…&lt;/tool_result&gt;\n&lt;user&gt;Diagnose the loop.&lt;/user&gt;"</span>,
+  <span class="prop">output</span>: <span class="str">"Found the bug. In src/pages/auth/callback.ts line 47, …"</span>,
+  <span class="prop">toolCalls</span>: [{ <span class="prop">name</span>: <span class="str">"read_file"</span>, <span class="prop">args</span>: { <span class="prop">path</span>: <span class="str">"src/pages/auth/callback.ts"</span> }, <span class="prop">result</span>: <span class="str">"98 lines"</span> }],
+  <span class="prop">decision</span>: {
+    <span class="prop">goal</span>: <span class="str">"Find why isValidSession() returns false immediately after SSO sets the cookie."</span>,
+    <span class="prop">options</span>: [
+      { <span class="prop">label</span>: <span class="str">"Cookie set with wrong domain (subdomain mismatch)"</span>, <span class="prop">chosen</span>: <span class="kw">true</span>,  <span class="prop">reason</span>: <span class="str">"…"</span> },
+      { <span class="prop">label</span>: <span class="str">"Cookie TTL too short"</span>,                              <span class="prop">chosen</span>: <span class="kw">false</span>, <span class="prop">reason</span>: <span class="str">"Set to 24h; unlikely."</span> },
+      { <span class="prop">label</span>: <span class="str">"Session store eventually consistent"</span>,              <span class="prop">chosen</span>: <span class="kw">false</span>, <span class="prop">reason</span>: <span class="str">"Using signed cookies, no remote store."</span> },
+      { <span class="prop">label</span>: <span class="str">"CSRF middleware strips cookie"</span>,                    <span class="prop">chosen</span>: <span class="kw">false</span>, <span class="prop">reason</span>: <span class="str">"CSRF runs after auth in the stack."</span> },
+    ],
+    <span class="prop">why</span>: <span class="str">"Only the domain-mismatch hypothesis explains the loop *and* is consistent with the callback code on line 47."</span>,
+  },
+};</code></pre>
+
+<p>And its branch <code>n4b</code> (human experiment from the panel):</p>
+<pre><code><span class="kw">const</span> <span class="prop">n4b</span>: <span class="type">Node</span> = {
+  ...,
+  <span class="prop">id</span>: <span class="str">"n4b"</span>,
+  <span class="prop">parent</span>: <span class="str">"n3"</span>,               <span class="com">// same parent as n4 — siblings in the tree</span>
+  <span class="prop">kind</span>: <span class="str">"experiment"</span>,
+  <span class="prop">isBranch</span>: <span class="kw">true</span>,
+  <span class="prop">branchLabel</span>: <span class="str">"new approach"</span>,
+  <span class="prop">branchKind</span>: <span class="str">"experiment"</span>,
+  <span class="prop">model</span>: <span class="str">"claude-opus-4"</span>,
+  <span class="com">// …</span>
+};</code></pre>
+<p>The <code>BranchExperimentSpec</code> that produced <code>n4b</code> would reference <code>sourceNodeId: "n4"</code> or <code>"n3"</code> depending on whether the semantics are "rerun n4" or "new child of n3" — see §9.1.</p>
+
+<!-- ─────────── §9 ─────────── -->
+<h2 id="s9">§9 Decisions log <a href="#s9" class="anchor">#</a></h2>
+<p>Resolved 2026-04-21 — recorded here so the rationale stays with the spec.</p>
+<table>
+<thead><tr><th>#</th><th>Question</th><th>Decision</th><th>Lives in</th></tr></thead>
+<tbody>
+<tr>
+  <td>1</td>
+  <td>Branch ancestry: sibling or child?</td>
+  <td><strong>Sibling</strong> — new node's <code>parent = sourceNode.parent</code>. "Branching from n4" means "try a different n4".</td>
+  <td>§1.5</td>
+</tr>
+<tr>
+  <td>2</td>
+  <td>Where does <code>tool_result</code> translation live?</td>
+  <td><strong>Provider adapter at the HTTP boundary.</strong> Canonical <code>ContextMessage</code> stays provider-agnostic; each provider has a thin adapter.</td>
+  <td>§2.4</td>
+</tr>
+<tr>
+  <td>3</td>
+  <td>Symbol identity across renames?</td>
+  <td><strong>New id + lineage link.</strong> Append-only <code>SymbolRename</code> log; <code>CodeSymbol.previousIds</code> caches the chain for fast reads.</td>
+  <td>§4.3</td>
+</tr>
+<tr>
+  <td>4</td>
+  <td>Is <code>ContextMessage.enabled</code>/<code>collapsed</code> persisted?</td>
+  <td><strong>UI-only.</strong> Split into <code>ContextMessage</code> (persisted: role/content/source) and <code>ContextMessageUI</code> (adds enabled/collapsed). Disabled messages are filtered before submit.</td>
+  <td>§2.2</td>
+</tr>
+</tbody>
+</table>
+
+<div class="footer">
+  traceframe · data-model · draft · 2026-04-21
+</div>
+
+</main>
+</div>
+
+<script>
+// Simple TOC highlighter
+const tocLinks = [...document.querySelectorAll('.toc a')];
+const sections = tocLinks
+  .map(a => document.querySelector(a.getAttribute('href')))
+  .filter(Boolean);
+const io = new IntersectionObserver((entries) => {
+  entries.forEach(e => {
+    if (!e.isIntersecting) return;
+    const id = e.target.id;
+    tocLinks.forEach(a => a.classList.toggle('active', a.getAttribute('href') === '#' + id));
+  });
+}, { rootMargin: '-40% 0px -55% 0px' });
+sections.forEach(s => io.observe(s));
+</script>
+
+</body>
+</html>
