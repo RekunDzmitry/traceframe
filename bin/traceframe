@@ -4,12 +4,14 @@
 //   traceframe session-start   (SessionStart hook: spawns tail, emits trace.started)
 //   traceframe session-stop    (Stop hook: signals tail, emits trace.closed)
 //   traceframe tail            (background worker: tails transcript → events)
+//   traceframe memory-fetch    (SessionStart hook: prints prior session memories as additionalContext)
+//   traceframe memory-write    (SessionEnd hook: triggers server-side distillation)
 //
-// All three expect TRACEFRAME_API_KEY and TRACEFRAME_ENDPOINT in env.
-// session-start / session-stop read the hook payload from stdin.
+// All expect TRACEFRAME_API_KEY and TRACEFRAME_ENDPOINT in env.
+// session-start / session-stop / memory-fetch / memory-write read the hook payload from stdin.
 
-import { readFileSync, existsSync, mkdirSync, statSync, openSync, readSync, closeSync, writeFileSync, unlinkSync, appendFileSync } from "node:fs";
-import { spawn } from "node:child_process";
+import { readFileSync, existsSync, mkdirSync, statSync, openSync, readSync, closeSync, writeFileSync, unlinkSync, appendFileSync, realpathSync } from "node:fs";
+import { spawn, spawnSync } from "node:child_process";
 import { join } from "node:path";
 import { tmpdir, hostname } from "node:os";
 
@@ -64,17 +66,22 @@ const sessionStart = async () => {
     process.exit(0);
   }
 
-  // Claude Code re-fires SessionStart on compact/resume/clear. If the previous
-  // tail worker is still alive, a second one would re-read the transcript from
-  // offset 0 and re-emit every line — flooding the dashboard with duplicates.
-  // Skip silently in that case.
+  // Claude Code re-fires SessionStart on compact/resume/clear. Only `compact`
+  // is a same-session continuation where a second tail would duplicate every
+  // line; `resume`/`clear`/`startup` are new session continuations that need
+  // a fresh tail. Suppress on compact, terminate-and-respawn otherwise.
   const sp = statePath(sessionId);
+  const source = payload.source || "startup";
   if (existsSync(sp)) {
     try {
       const prev = JSON.parse(readFileSync(sp, "utf8"));
       if (isAlive(prev.tailPid)) {
-        log(sessionId, `session-start re-fire ignored (tail pid=${prev.tailPid} alive, source=${payload.source || "?"})`);
-        return;
+        if (source === "compact") {
+          log(sessionId, `session-start compact re-fire ignored (tail pid=${prev.tailPid} alive)`);
+          return;
+        }
+        log(sessionId, `session-start ${source}: terminating stale tail pid=${prev.tailPid}`);
+        try { process.kill(prev.tailPid, "SIGTERM"); } catch {}
       }
     } catch {}
   }
@@ -274,6 +281,161 @@ const tailLoop = async () => {
   poll();
 };
 
+// ─────────────────────────── memory helpers ───────────────────────────
+
+const repoTag = (cwd) => {
+  const dir = cwd || process.cwd();
+  try {
+    const r = spawnSync("git", ["-C", dir, "config", "--get", "remote.origin.url"], {
+      encoding: "utf8",
+      timeout: 1000,
+    });
+    if (r.status === 0 && r.stdout) {
+      let url = r.stdout.trim().toLowerCase();
+      if (url.endsWith(".git")) url = url.slice(0, -4);
+      // git@host:path → host/path
+      const m = url.match(/^git@([^:]+):(.+)$/);
+      if (m) url = `${m[1]}/${m[2]}`;
+      // protocol://host/path → host/path
+      url = url.replace(/^[a-z]+:\/\/(?:[^@]+@)?/, "");
+      if (url) return url;
+    }
+  } catch {}
+  try { return realpathSync(dir); } catch { return dir; }
+};
+
+const memoryFetch = async () => {
+  const payload = await readStdinJson();
+  if (payload.source === "compact") return; // don't reinject on compaction
+  const tag = repoTag(payload.cwd || process.cwd());
+
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 1500);
+  let data;
+  try {
+    const url = `${ENDPOINT}/memory/recent?repo=${encodeURIComponent(tag)}&limit=3`;
+    const headers = API_KEY ? { authorization: `Bearer ${API_KEY}` } : {};
+    const res = await fetch(url, { headers, signal: ctrl.signal });
+    if (!res.ok) return;
+    data = await res.json();
+  } catch {
+    return; // silent: no memory yet, server down, timeout, etc.
+  } finally {
+    clearTimeout(timer);
+  }
+
+  const memories = Array.isArray(data?.memories) ? data.memories : [];
+  if (!memories.length) return;
+
+  const sections = memories.map((m, i) => {
+    const heading = i === 0 ? "Most recent" : `Older (${m.createdAt})`;
+    const tail = m.traceId ? ` — \`${m.traceId.slice(-8)}\`` : "";
+    return `### ${heading}${tail}\n\n${m.summary}`;
+  });
+  const md = `## Prior context for this repo (\`${tag}\`)\n\n${sections.join("\n\n---\n\n")}`;
+
+  const out = {
+    hookSpecificOutput: {
+      hookEventName: "SessionStart",
+      additionalContext: md,
+    },
+  };
+  console.log(JSON.stringify(out));
+};
+
+const memoryWrite = async () => {
+  const payload = await readStdinJson();
+  const sessionId = payload.session_id || payload.sessionId;
+  if (!sessionId) return;
+  const sp = statePath(sessionId);
+  if (!existsSync(sp)) {
+    log(sessionId, "memory-write: no state file");
+    return;
+  }
+  let state;
+  try {
+    state = JSON.parse(readFileSync(sp, "utf8"));
+  } catch {
+    return;
+  }
+  const tag = repoTag(state.cwd);
+
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 5000);
+  try {
+    const headers = { "content-type": "application/json" };
+    if (API_KEY) headers.authorization = `Bearer ${API_KEY}`;
+    const res = await fetch(`${ENDPOINT}/memory/distill/${encodeURIComponent(sessionId)}`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ repo_tag: tag, trace_id: state.traceId }),
+      signal: ctrl.signal,
+    });
+    log(sessionId, `memory-write: ${res.status} (repo=${tag})`);
+  } catch (e) {
+    log(sessionId, `memory-write failed: ${e.message}`);
+  } finally {
+    clearTimeout(timer);
+  }
+};
+
+// ─────────────────────────── gitnexus-index ─────────────────────────
+
+const gitnexusIndex = async () => {
+  const argPath = process.argv[3];
+  const rootPath = argPath ? realpathSync(argPath) : process.cwd();
+  const tag = repoTag(rootPath);
+
+  const headers = { "content-type": "application/json" };
+  if (API_KEY) headers.authorization = `Bearer ${API_KEY}`;
+
+  let res;
+  try {
+    res = await fetch(`${ENDPOINT}/codegraph/index`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ repoTag: tag, path: rootPath }),
+    });
+  } catch (e) {
+    console.error(`gitnexus-index: failed to reach ${ENDPOINT}: ${e.message}`);
+    process.exit(1);
+  }
+  if (!res.ok) {
+    const detail = await res.text().catch(() => "");
+    console.error(`gitnexus-index: server returned ${res.status}\n${detail.slice(0, 300)}`);
+    process.exit(1);
+  }
+  console.log(`indexing ${tag} (${rootPath})…`);
+
+  // Poll status for up to 60s; report transitions.
+  const statusUrl = `${ENDPOINT}/codegraph/repo?tag=${encodeURIComponent(tag)}`;
+  const statusHeaders = API_KEY ? { authorization: `Bearer ${API_KEY}` } : {};
+  let last = null;
+  const deadline = Date.now() + 60_000;
+  while (Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, 1000));
+    let s;
+    try {
+      const r = await fetch(statusUrl, { headers: statusHeaders });
+      if (!r.ok) continue;
+      s = (await r.json()).repo;
+    } catch { continue; }
+    if (!s) continue;
+    if (s.status !== last) {
+      console.log(`  ${s.status}${s.statusError ? ": " + s.statusError : ""}`);
+      last = s.status;
+    }
+    if (s.status === "ready") {
+      console.log(`  ${s.fileCount} files, ${s.symbolCount} symbols`);
+      return;
+    }
+    if (s.status === "failed") {
+      process.exit(1);
+    }
+  }
+  console.log("  still indexing — check the dashboard for progress.");
+};
+
 // ─────────────────────────── session-stop ───────────────────────────
 
 const sessionStop = async () => {
@@ -325,7 +487,10 @@ const run = async () => {
   if (cmd === "session-start") return sessionStart();
   if (cmd === "session-stop") return sessionStop();
   if (cmd === "tail") return tailLoop();
-  console.error("usage: traceframe <session-start|session-stop|tail>");
+  if (cmd === "memory-fetch") return memoryFetch();
+  if (cmd === "memory-write") return memoryWrite();
+  if (cmd === "gitnexus-index") return gitnexusIndex();
+  console.error("usage: traceframe <session-start|session-stop|tail|memory-fetch|memory-write|gitnexus-index [path]>");
   process.exit(2);
 };
 run().catch((e) => { console.error(e); process.exit(1); });

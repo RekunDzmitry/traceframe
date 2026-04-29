@@ -1,5 +1,5 @@
-// Tree component — node-link graph, left-to-right.
-// Layout: compute depth-based columns, spread siblings vertically.
+// Tree component — node-link graph, top-to-bottom.
+// Layout: compute depth-based rows, spread siblings horizontally.
 
 const { useMemo, useState, useEffect, useRef } = React;
 
@@ -15,7 +15,7 @@ function layoutTree(nodes, { includeBranches }) {
   });
   const root = nodes.find((n) => n.parent == null);
 
-  // Assign columns (depth)
+  // Assign rows (depth → vertical position)
   const depth = {};
   const walk = (id, d) => {
     depth[id] = d;
@@ -23,37 +23,36 @@ function layoutTree(nodes, { includeBranches }) {
   };
   walk(root.id, 0);
 
-  // Assign rows — DFS ordering, but group branches after main path
-  const row = {};
+  // Assign columns — DFS ordering, but group branches after main path
+  const col = {};
   let cursor = 0;
   const assign = (id) => {
     const kids = children[id] || [];
     if (kids.length === 0) {
-      row[id] = cursor++;
+      col[id] = cursor++;
       return;
     }
     // Main children first (non-branch), then branches
     const main = kids.filter((k) => !byId[k].isBranch);
     const br = kids.filter((k) => byId[k].isBranch);
-    const startCursor = cursor;
     [...main, ...br].forEach((k) => assign(k));
-    row[id] = (row[kids[0]] + row[kids[kids.length - 1]]) / 2;
-    // Nudge root-ish nodes up if only one child
-    if (kids.length === 1) row[id] = row[kids[0]];
+    col[id] = (col[kids[0]] + col[kids[kids.length - 1]]) / 2;
+    // Nudge parent into line if only one child
+    if (kids.length === 1) col[id] = col[kids[0]];
   };
   assign(root.id);
 
   // Positioning in px
-  const COL = 172;
-  const ROW = 68;
-  const PAD_X = 36;
-  const PAD_Y = 32;
+  const COL = 140; // horizontal spacing between sibling columns
+  const ROW = 100; // vertical spacing between depth rows (room for circle + 2 meta lines)
+  const PAD_X = 48;
+  const PAD_Y = 40;
   const nodesWithPos = nodes
     .filter((n) => includeBranches || !n.isBranch)
     .map((n) => ({
       ...n,
-      x: PAD_X + depth[n.id] * COL,
-      y: PAD_Y + row[n.id] * ROW,
+      x: PAD_X + col[n.id] * COL,
+      y: PAD_Y + depth[n.id] * ROW,
     }));
 
   const edges = [];
@@ -65,12 +64,12 @@ function layoutTree(nodes, { includeBranches }) {
   });
 
   const maxDepth = Math.max(...Object.values(depth));
-  const maxRow = Math.max(...Object.values(row));
+  const maxCol = Math.max(...Object.values(col));
   return {
     nodes: nodesWithPos,
     edges,
-    width: PAD_X * 2 + (maxDepth + 1) * COL,
-    height: PAD_Y * 2 + (maxRow + 1) * ROW,
+    width: PAD_X * 2 + (maxCol + 1) * COL,
+    height: PAD_Y * 2 + (maxDepth + 1) * ROW,
   };
 }
 
@@ -160,9 +159,9 @@ function basename(p) {
 }
 
 function Edge({ e }) {
-  const dx = e.to.x - e.from.x;
-  const midX = e.from.x + dx * 0.5;
-  const path = `M ${e.from.x + 18} ${e.from.y} C ${midX} ${e.from.y}, ${midX} ${e.to.y}, ${e.to.x - 18} ${e.to.y}`;
+  const dy = e.to.y - e.from.y;
+  const midY = e.from.y + dy * 0.5;
+  const path = `M ${e.from.x} ${e.from.y + 18} C ${e.from.x} ${midY}, ${e.to.x} ${midY}, ${e.to.x} ${e.to.y - 18}`;
   return (
     <path
       d={path}

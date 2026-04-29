@@ -126,6 +126,120 @@ button, input, textarea, select { font-family: inherit; font-size: inherit; colo
 .trace-delete:hover { color: var(--accent-red); background: var(--accent-red-soft); }
 @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
 
+/* ── Memory items (sidebar) ──────────────────── */
+.memory-item {
+  padding: 6px 12px; cursor: pointer;
+  border-left: 2px solid transparent;
+  display: grid; gap: 2px;
+  font-size: 12px;
+}
+.memory-item:hover { background: var(--surface-2); }
+.memory-item.is-active { background: var(--surface-2); border-left-color: var(--accent-blue); }
+.memory-item .mem-top {
+  display: flex; align-items: center; justify-content: space-between;
+  font-family: var(--font-mono); font-size: 10.5px; color: var(--muted);
+}
+.memory-item .mem-repo { font-weight: 500; color: var(--ink); font-size: 12px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.memory-item .mem-preview { color: var(--muted); font-size: 11.5px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sidebar-empty { padding: 4px 0; font-size: 11.5px; color: var(--muted-2); font-style: italic; }
+
+/* ── Memory project groups ───────────────────── */
+.project-group { border-bottom: 1px solid var(--border); }
+.project-group:last-child { border-bottom: none; }
+.project-header {
+  display: grid; grid-template-columns: 12px 1fr auto;
+  align-items: center; gap: 6px;
+  padding: 8px 12px; cursor: pointer;
+  background: transparent;
+  user-select: none;
+}
+.project-header:hover { background: var(--surface-2); }
+.project-chevron {
+  font-family: var(--font-mono); font-size: 9px;
+  color: var(--muted-2); width: 12px; text-align: center;
+  transition: transform 120ms;
+}
+.project-group.is-open .project-chevron { transform: rotate(90deg); }
+.project-name {
+  font-size: 12px; font-weight: 500; color: var(--ink);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.project-meta {
+  font-family: var(--font-mono); font-size: 10.5px; color: var(--muted);
+  display: flex; align-items: center; gap: 6px;
+}
+.project-count {
+  background: var(--surface-2); color: var(--muted);
+  border-radius: 100px; padding: 0 6px; font-size: 10px;
+}
+.project-memories { display: none; padding-bottom: 4px; }
+.project-group.is-open .project-memories { display: block; }
+.project-memories .memory-item { padding-left: 28px; }
+.project-loading {
+  padding: 6px 12px 6px 28px;
+  font-size: 11.5px; color: var(--muted-2); font-style: italic;
+}
+
+/* ── Memory detail view (main area) ──────────── */
+.memory-view { padding: 16px 20px; overflow: auto; max-width: 880px; margin: 0 auto; }
+.memory-view .mv-header {
+  display: flex; align-items: baseline; justify-content: space-between;
+  padding-bottom: 10px; margin-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+}
+.memory-view .mv-title { font-size: 14px; font-weight: 500; }
+.memory-view .mv-time { font-family: var(--font-mono); font-size: 11px; color: var(--muted); }
+.memory-view .mv-sub {
+  font-family: var(--font-mono); font-size: 11px; color: var(--muted);
+  margin-bottom: 16px; display: flex; gap: 12px; flex-wrap: wrap;
+}
+.memory-view .mv-body { font-size: 13px; line-height: 1.55; }
+.memory-view .mv-body h3 {
+  font-size: 12px; font-weight: 600; margin: 16px 0 6px;
+  color: var(--ink); text-transform: uppercase; letter-spacing: 0.04em;
+}
+.memory-view .mv-body h3:first-child { margin-top: 0; }
+.memory-view .mv-body ul { margin: 4px 0 8px; padding-left: 20px; }
+.memory-view .mv-body li { margin: 2px 0; }
+.memory-view .mv-body p { margin: 6px 0; }
+.memory-view .mv-body code {
+  font-family: var(--font-mono); font-size: 12px;
+  background: var(--surface-2); padding: 1px 5px; border-radius: 2px;
+}
+.memory-view .mv-meta {
+  margin-top: 20px; padding-top: 10px;
+  border-top: 1px solid var(--border);
+  font-family: var(--font-mono); font-size: 10.5px; color: var(--muted);
+  display: flex; gap: 12px; flex-wrap: wrap;
+}
+.memory-view .mv-header-right {
+  display: flex; flex-direction: column; align-items: flex-end; gap: 4px;
+}
+.memory-view .mv-actions { display: flex; gap: 6px; }
+.memory-view .mv-warning {
+  font-size: 10.5px; color: var(--accent-red);
+  background: var(--accent-red-soft);
+  padding: 2px 8px; border-radius: 100px;
+  font-family: var(--font-mono);
+}
+.chip-danger:hover {
+  background: var(--accent-red-soft);
+  color: var(--accent-red);
+  border-color: var(--accent-red-soft);
+}
+.mv-edit-textarea {
+  width: 100%; min-height: 240px; box-sizing: border-box;
+  font-family: var(--font-mono); font-size: 12px; line-height: 1.55;
+  padding: 10px 12px;
+  background: var(--surface); color: var(--ink);
+  border: 1px solid var(--border-strong); border-radius: 3px;
+  resize: vertical;
+}
+.mv-edit-textarea:focus { outline: none; border-color: var(--accent-blue); }
+.mv-edit-actions { display: flex; gap: 6px; margin-top: 8px; }
+
 .main-area {
   display: grid;
   grid-template-columns: 1.4fr 1fr;
@@ -324,6 +438,374 @@ button, input, textarea, select { font-family: inherit; font-size: inherit; colo
 }
 .btn-danger:hover { filter: brightness(0.95); }
 @keyframes fadeIn { from { opacity: 0 } to { opacity: 1 } }
+
+/* ── Code graph (sidebar + main view) ────────── */
+.cg-item {
+  padding: 6px 12px; cursor: pointer;
+  border-left: 2px solid transparent;
+  display: grid; gap: 2px; font-size: 12px;
+  position: relative;
+}
+.cg-item:hover { background: var(--surface-2); }
+.cg-item.is-active { background: var(--surface-2); border-left-color: var(--accent-amber); }
+.cg-item .cg-name { font-weight: 500; color: var(--ink);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cg-item .cg-meta {
+  font-family: var(--font-mono); font-size: 10.5px; color: var(--muted);
+  display: flex; gap: 8px; align-items: center;
+}
+.cg-status {
+  display: inline-block; padding: 0 5px; border-radius: 100px;
+  font-size: 10px; font-family: var(--font-mono);
+}
+.cg-status-pending  { background: var(--surface-2); color: var(--muted); }
+.cg-status-indexing { background: var(--accent-amber-soft); color: oklch(0.4 0.12 75); }
+.cg-status-ready    { background: var(--accent-green-soft); color: oklch(0.4 0.1 145); }
+.cg-status-failed   { background: var(--accent-red-soft); color: var(--accent-red); }
+.cg-actions {
+  position: absolute; top: 6px; right: 6px;
+  opacity: 0; transition: opacity 120ms;
+  display: flex; gap: 2px;
+}
+.cg-item:hover .cg-actions { opacity: 1; }
+.cg-action {
+  background: transparent; border: 1px solid transparent;
+  color: var(--muted-2); padding: 0 5px; line-height: 1;
+  font-size: 12px; cursor: pointer; border-radius: 3px;
+}
+.cg-action:hover { background: var(--bg); color: var(--ink); }
+.cg-action.cg-danger:hover { color: var(--accent-red); background: var(--accent-red-soft); }
+
+.cg-index-btn {
+  background: transparent; border: 1px dashed var(--border-strong);
+  color: var(--muted); padding: 1px 7px; font-size: 10.5px;
+  font-family: var(--font-mono); border-radius: 3px; cursor: pointer;
+}
+.cg-index-btn:hover { background: var(--surface-2); color: var(--ink); border-color: var(--ink); }
+
+.cg-form {
+  margin: 4px 12px 8px;
+  padding: 8px;
+  background: var(--bg); border: 1px solid var(--border-strong);
+  border-radius: 3px;
+  display: grid; gap: 6px;
+}
+.cg-form label { font-size: 10.5px; color: var(--muted); font-family: var(--font-mono); }
+.cg-form input {
+  font-family: var(--font-mono); font-size: 11.5px;
+  padding: 4px 6px; border: 1px solid var(--border-strong); border-radius: 3px;
+  background: var(--surface); color: var(--ink); width: 100%;
+}
+.cg-form input:focus { outline: none; border-color: var(--accent-blue); }
+.cg-form-actions { display: flex; gap: 6px; justify-content: flex-end; }
+
+/* Code-view three-pane layout (replaces .main-area contents when a repo is selected) */
+.code-view {
+  display: grid; grid-template-columns: 280px 1fr 320px;
+  height: 100%; overflow: hidden;
+}
+.code-pane {
+  border-right: 1px solid var(--border);
+  overflow: auto; min-width: 0;
+  display: flex; flex-direction: column;
+}
+.code-pane:last-child { border-right: none; }
+.code-pane-header {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  font-size: 11.5px; font-weight: 500;
+  display: flex; align-items: center; justify-content: space-between;
+  flex-shrink: 0;
+}
+.code-pane-body { flex: 1; overflow: auto; padding: 4px 0; }
+
+.cg-file-row, .cg-sym-row {
+  padding: 4px 12px; cursor: pointer;
+  display: grid; gap: 2px;
+  font-size: 11.5px; font-family: var(--font-mono);
+  border-left: 2px solid transparent;
+}
+.cg-file-row:hover, .cg-sym-row:hover { background: var(--surface-2); }
+.cg-file-row.is-active, .cg-sym-row.is-active {
+  background: var(--surface-2); border-left-color: var(--accent-amber);
+}
+.cg-file-path { color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cg-file-meta { font-size: 10px; color: var(--muted); }
+.cg-sym-name { color: var(--ink); display: flex; gap: 6px; align-items: baseline; }
+.cg-sym-kind {
+  display: inline-block; padding: 0 4px; border-radius: 2px;
+  background: var(--surface-2); color: var(--muted);
+  font-size: 9px; text-transform: uppercase; letter-spacing: 0.04em;
+}
+.cg-sym-kind.kind-class     { background: var(--accent-blue-soft); color: #1e3a8a; }
+.cg-sym-kind.kind-method    { background: var(--accent-green-soft); color: #0f5132; }
+.cg-sym-kind.kind-function  { background: var(--accent-green-soft); color: #0f5132; }
+.cg-sym-kind.kind-interface { background: var(--accent-amber-soft); color: #78350f; }
+.cg-sym-kind.kind-type      { background: var(--accent-amber-soft); color: #78350f; }
+.cg-sym-sig { font-size: 10px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.cg-detail { padding: 14px 16px; }
+.cg-detail h3 {
+  font-size: 11px; font-weight: 600; margin: 14px 0 6px;
+  color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em;
+}
+.cg-detail-title { font-size: 13px; font-weight: 500; color: var(--ink); margin-bottom: 4px; word-break: break-word; }
+.cg-detail-loc { font-family: var(--font-mono); font-size: 11px; color: var(--muted); }
+.cg-detail-sig {
+  font-family: var(--font-mono); font-size: 11px;
+  background: var(--surface); border: 1px solid var(--border);
+  padding: 6px 8px; border-radius: 3px;
+  white-space: pre-wrap; word-break: break-word;
+  margin: 8px 0;
+}
+.cg-call-row {
+  display: block; width: 100%; text-align: left;
+  background: var(--surface-2); border: 1px solid var(--border);
+  padding: 5px 8px; margin-bottom: 3px; border-radius: 3px;
+  cursor: pointer; font-family: var(--font-mono); font-size: 11px;
+  color: var(--ink);
+}
+.cg-call-row:hover { background: var(--bg); }
+.cg-call-row.is-external { cursor: default; color: var(--muted); }
+.cg-call-row .cg-call-loc { font-size: 10px; color: var(--muted); margin-top: 2px; }
+
+.cg-empty { padding: 16px 12px; color: var(--muted); font-size: 11.5px; text-align: center; font-style: italic; }
+
+/* Code-view shell with mode toggle (list ↔ graph) */
+.cg-shell { display: grid; grid-template-rows: 36px 1fr; height: 100%; }
+.cg-toolbar {
+  display: flex; align-items: center; gap: 10px;
+  padding: 0 12px; border-bottom: 1px solid var(--border);
+  background: var(--surface); font-size: 11.5px;
+}
+.cg-toolbar .cg-repo-label {
+  font-family: var(--font-mono); font-size: 11.5px; color: var(--ink); font-weight: 500;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0;
+}
+.cg-mode-tabs { display: flex; gap: 2px; }
+.cg-mode-tabs button {
+  background: transparent; border: 1px solid transparent;
+  padding: 2px 9px; font-size: 11px; font-family: var(--font-mono);
+  border-radius: 3px; cursor: pointer; color: var(--muted);
+}
+.cg-mode-tabs button:hover { background: var(--surface-2); color: var(--ink); }
+.cg-mode-tabs button.is-on {
+  background: var(--bg); border-color: var(--border-strong); color: var(--ink);
+}
+.cg-search {
+  flex: 1; max-width: 360px; display: flex; gap: 4px; align-items: center;
+}
+.cg-search input {
+  flex: 1; min-width: 0;
+  font-family: var(--font-mono); font-size: 11px;
+  padding: 3px 7px; border: 1px solid var(--border-strong);
+  border-radius: 3px; background: var(--bg); color: var(--ink);
+}
+.cg-search input:focus { outline: none; border-color: var(--accent-blue); }
+.cg-search-mode {
+  background: var(--surface-2); border: 1px solid var(--border);
+  font-family: var(--font-mono); font-size: 10px;
+  padding: 3px 7px; border-radius: 3px; cursor: pointer; color: var(--muted);
+}
+.cg-search-mode.is-on { background: var(--accent-blue-soft); color: #1e3a8a; border-color: var(--accent-blue); }
+.cg-search-results {
+  position: absolute; top: 36px; left: 0; right: 0; z-index: 30;
+  background: var(--bg); border: 1px solid var(--border-strong);
+  border-radius: 3px; box-shadow: var(--shadow-2);
+  max-height: 380px; overflow: auto;
+}
+.cg-search-result {
+  display: block; width: 100%; text-align: left;
+  background: transparent; border: none; border-bottom: 1px solid var(--border);
+  padding: 7px 12px; cursor: pointer; font-family: var(--font-mono); font-size: 11px;
+  color: var(--ink);
+}
+.cg-search-result:hover { background: var(--surface-2); }
+.cg-search-result-meta { font-size: 10px; color: var(--muted); margin-top: 2px; }
+.cg-search-result-dist { float: right; font-size: 10px; color: var(--muted); }
+.cg-search-wrap { position: relative; flex: 1; max-width: 360px; }
+
+/* Graph mode: SVG canvas + detail */
+.cg-graph-view { display: grid; grid-template-columns: 1fr 320px; height: 100%; overflow: hidden; }
+.cg-graph-canvas { position: relative; overflow: hidden; background: var(--bg); }
+.cg-graph-canvas svg { display: block; width: 100%; height: 100%; cursor: grab; }
+.cg-graph-canvas svg:active { cursor: grabbing; }
+.cg-graph-detail {
+  border-left: 1px solid var(--border);
+  background: var(--surface);
+  padding: 14px 16px; overflow: auto;
+}
+.cg-graph-legend {
+  position: absolute; right: 10px; bottom: 10px;
+  display: flex; gap: 14px;
+  font-family: var(--font-mono); font-size: 10.5px; color: var(--muted);
+  background: rgba(255,255,255,0.85); padding: 4px 8px;
+  border-radius: 3px; border: 1px solid var(--border);
+  pointer-events: none;
+}
+.cg-graph-legend .leg-line {
+  display: inline-block; width: 18px; height: 0;
+  margin-right: 4px; vertical-align: middle;
+  border-top: 1.5px solid var(--border-strong);
+}
+.cg-graph-legend .leg-line.is-call { border-top-style: dashed; border-top-color: var(--accent-blue); }
+.cg-graph-legend .leg-line.is-import { border-top-color: var(--border-strong); }
+.cg-graph-stat { font-family: var(--font-mono); font-size: 10.5px; color: var(--muted); }
+.cgn-label { pointer-events: none; font-size: 9.5px; fill: var(--muted); font-family: var(--font-mono); }
+.cgn-label.is-focus { fill: var(--ink); font-size: 10.5px; }
+.cg-graph-empty {
+  padding: 20px; text-align: center; color: var(--muted);
+  font-family: var(--font-mono); font-size: 11px;
+}
+.cg-impact-list { display: grid; gap: 3px; margin-top: 4px; }
+.cg-impact-row {
+  display: block; width: 100%; text-align: left;
+  background: var(--surface-2); border: 1px solid var(--border);
+  padding: 4px 7px; border-radius: 3px;
+  cursor: pointer; font-family: var(--font-mono); font-size: 10.5px;
+  color: var(--ink);
+}
+.cg-impact-row:hover { background: var(--bg); }
+.cg-impact-row .cg-impact-depth {
+  display: inline-block; min-width: 18px; padding: 0 4px;
+  font-size: 9.5px; color: var(--muted); margin-right: 6px;
+  background: var(--bg); border-radius: 2px; border: 1px solid var(--border);
+}
+.cg-mem-row {
+  display: block; width: 100%; text-align: left;
+  background: var(--surface-2); border: 1px solid var(--border);
+  padding: 6px 8px; margin-bottom: 4px; border-radius: 3px;
+  font-family: var(--font); font-size: 11px; color: var(--ink);
+}
+.cg-mem-row .cg-mem-meta {
+  font-family: var(--font-mono); font-size: 9.5px; color: var(--muted); margin-bottom: 2px;
+}
+
+/* ── Graph view ──────────────────────────────────── */
+.graph-view {
+  display: none;
+  grid-template-columns: 240px 1fr 320px;
+  height: 100%;
+  background: var(--bg);
+  --gn-repo: var(--ink);
+  --gn-memory: var(--accent-green);
+  --gn-file: var(--accent-blue);
+  --gn-decision: var(--accent-amber);
+  --gn-thread: oklch(0.55 0.16 305);
+  --gn-gotcha: var(--accent-red);
+}
+.graph-view.is-active { display: grid; grid-column: 1 / -1; }
+.graph-pane-left {
+  border-right: 1px solid var(--border);
+  background: var(--surface);
+  padding: 12px;
+  overflow: auto;
+  display: flex; flex-direction: column; gap: 16px;
+}
+.graph-pane-canvas {
+  position: relative; overflow: hidden; background: var(--bg);
+}
+.graph-pane-canvas svg { display: block; width: 100%; height: 100%; cursor: grab; }
+.graph-pane-canvas svg:active { cursor: grabbing; }
+.graph-pane-right {
+  border-left: 1px solid var(--border);
+  background: var(--surface);
+  padding: 14px 16px;
+  overflow: auto;
+}
+.graph-filter-label {
+  font-size: 10.5px; color: var(--muted);
+  text-transform: uppercase; letter-spacing: 0.08em;
+  margin-bottom: 6px;
+}
+.graph-type-chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.graph-type-chip {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 3px 9px; border-radius: 12px;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  font-size: 11px; cursor: pointer;
+  color: var(--muted); user-select: none;
+}
+.graph-type-chip.is-on {
+  border-color: var(--border-strong);
+  background: var(--bg);
+  color: var(--ink);
+}
+.graph-type-dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: var(--gtc-color, var(--muted));
+}
+.graph-repo-select {
+  width: 100%;
+  font-size: 11.5px;
+  padding: 5px 7px;
+  border: 1px solid var(--border-strong);
+  border-radius: 3px;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font);
+}
+.graph-stats { font-size: 11px; color: var(--muted); font-family: var(--font-mono); line-height: 1.7; }
+.graph-stats .gs-num { color: var(--ink); }
+.graph-canvas-legend {
+  position: absolute; right: 10px; bottom: 10px;
+  display: flex; gap: 14px;
+  font-family: var(--font-mono); font-size: 10.5px;
+  color: var(--muted);
+  background: rgba(255,255,255,0.85);
+  padding: 4px 8px; border-radius: 3px;
+  border: 1px solid var(--border);
+  pointer-events: none;
+}
+.graph-leg-line {
+  display: inline-block; width: 18px; height: 0;
+  margin-right: 4px; vertical-align: middle;
+  border-top: 1.5px solid var(--border-strong);
+}
+.graph-leg-line.is-touched { border-top-color: var(--accent-blue); }
+.graph-leg-line.is-bullet { border-top: 1.2px dashed var(--muted-2); }
+.graph-detail-empty { color: var(--muted); font-size: 12px; font-family: var(--font-mono); }
+.graph-detail-head { margin-bottom: 12px; }
+.graph-detail-kind {
+  font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.08em;
+  color: var(--muted); margin-bottom: 4px;
+  display: inline-flex; align-items: center; gap: 6px;
+  font-family: var(--font-mono);
+}
+.graph-detail-kind-dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: var(--gtc-color, var(--muted));
+}
+.graph-detail-title { font-size: 13px; font-weight: 500; color: var(--ink); word-break: break-word; }
+.graph-detail-meta { font-size: 11px; color: var(--muted); margin-top: 4px; font-family: var(--font-mono); }
+.graph-detail-body { font-size: 12px; line-height: 1.55; color: var(--ink); }
+.graph-detail-body h3 {
+  font-size: 11.5px; font-weight: 600; margin: 14px 0 6px;
+  color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em;
+}
+.graph-detail-body ul { margin: 4px 0 8px; padding-left: 18px; }
+.graph-detail-body li { margin: 2px 0; }
+.graph-detail-body p { margin: 6px 0; }
+.graph-detail-body code {
+  font-family: var(--font-mono); font-size: 11px;
+  background: var(--surface-2); padding: 1px 4px; border-radius: 2px;
+}
+.graph-backlink {
+  display: block;
+  padding: 6px 8px; border-radius: 3px;
+  background: var(--surface-2); border: 1px solid var(--border);
+  margin-bottom: 4px; font-size: 11.5px; color: var(--ink);
+  cursor: pointer; text-align: left; width: 100%;
+  font-family: var(--font);
+}
+.graph-backlink:hover { background: var(--bg); }
+.graph-backlink-meta { font-size: 10.5px; color: var(--muted); margin-top: 2px; font-family: var(--font-mono); }
+
+.gn-label { pointer-events: none; font-size: 10px; fill: var(--muted); }
+.gn-label.is-hub { font-size: 11px; fill: var(--ink); font-weight: 500; font-family: var(--font-mono); }
+.gn-label.is-active { fill: var(--ink); }
 </style>
 </head>
 <body>
@@ -339,18 +821,36 @@ button, input, textarea, select { font-family: inherit; font-size: inherit; colo
       <span class="mono muted" id="status">loading…</span>
     </div>
     <div class="top-right">
+      <button class="chip chip-on" id="view-trace" title="Trace + memory browser">◎ traces</button>
+      <button class="chip" id="view-graph" title="Memory entity graph">◈ graph</button>
+      <span class="divider-v"></span>
       <label class="auto-label"><input type="checkbox" id="auto" checked/> auto-refresh 2s</label>
       <button class="chip" id="refresh">↻ refresh</button>
     </div>
   </div>
   <div class="workspace">
-    <aside class="sidebar">
+    <aside class="sidebar" id="sidebar">
       <div class="sidebar-section">
         <div class="sidebar-section-label">
           <span>Recent traces</span>
           <span class="mono" id="trace-count">0</span>
         </div>
         <div id="traces"></div>
+      </div>
+      <div class="sidebar-section">
+        <div class="sidebar-section-label">
+          <span>Memories</span>
+          <span class="mono" id="memory-count">0</span>
+        </div>
+        <div id="memories"></div>
+      </div>
+      <div class="sidebar-section">
+        <div class="sidebar-section-label">
+          <span>Code graph</span>
+          <button class="cg-index-btn" id="cg-index-btn" title="Index a repository">+ index</button>
+        </div>
+        <div id="cg-form-mount"></div>
+        <div id="cg-repos"></div>
       </div>
     </aside>
     <main class="main-area no-selection" id="main">
@@ -359,14 +859,51 @@ button, input, textarea, select { font-family: inherit; font-size: inherit; colo
         <p>New Claude Code sessions will appear here as they start. Begin one in any repo; the session's transcript streams to <code>POST /ingest/events</code>.</p>
       </div>
     </main>
+    <div class="graph-view" id="graph-view">
+      <aside class="graph-pane-left">
+        <div>
+          <div class="graph-filter-label">Repo</div>
+          <select class="graph-repo-select" id="graph-repo">
+            <option value="">all repos</option>
+          </select>
+        </div>
+        <div>
+          <div class="graph-filter-label">Show entities</div>
+          <div class="graph-type-chips" id="graph-types"></div>
+        </div>
+        <div>
+          <div class="graph-filter-label">Stats</div>
+          <div class="graph-stats" id="graph-stats">—</div>
+        </div>
+        <div>
+          <div class="graph-filter-label">Hint</div>
+          <div class="graph-stats">click a node to inspect.<br/>drag to reposition.<br/>files appear as hubs across sessions.</div>
+        </div>
+      </aside>
+      <div class="graph-pane-canvas" id="graph-canvas">
+        <svg id="graph-svg"></svg>
+        <div class="graph-canvas-legend">
+          <span><span class="graph-leg-line"></span>repo membership</span>
+          <span><span class="graph-leg-line is-touched"></span>file touched</span>
+          <span><span class="graph-leg-line is-bullet"></span>decision/thread/gotcha</span>
+        </div>
+      </div>
+      <aside class="graph-pane-right" id="graph-detail">
+        <div class="graph-detail-empty">click any node to inspect.</div>
+      </aside>
+    </div>
   </div>
 </div>
+<script src="https://d3js.org/d3.v7.min.js"></script>
 <script>
 const $ = (id) => document.getElementById(id);
 const SVG_NS = "http://www.w3.org/2000/svg";
 
 let selectedTrace = null;
 let selectedNode = null;
+let selectedMemoryId = null;
+let currentMemory = null;
+let memoryTick = 0;
 let currentEvents = [];
 let eventByUuid = new Map();
 let fullEventCache = new Map();
@@ -421,13 +958,380 @@ async function loadTraces() {
       if (e.target.closest(".trace-delete")) return;
       const id = el.dataset.id;
       if (selectedTrace !== id) { selectedTrace = id; selectedNode = null; }
+      selectedMemoryId = null;
       document.querySelectorAll(".trace-item").forEach(x => x.classList.toggle("is-active", x.dataset.id === selectedTrace));
+      document.querySelectorAll(".memory-item").forEach(x => x.classList.remove("is-active"));
       loadDetail();
     });
   });
   document.querySelectorAll(".trace-item .trace-delete").forEach(btn => {
     btn.addEventListener("click", (e) => { e.stopPropagation(); deleteTrace(btn.dataset.del); });
   });
+}
+
+// ── Memory list ────────────────────────────────────────────────────────
+
+const fmtRelTime = (iso) => {
+  const t = new Date(iso).getTime();
+  if (!Number.isFinite(t)) return "";
+  const sec = Math.max(0, (Date.now() - t) / 1000);
+  if (sec < 60) return Math.floor(sec) + "s ago";
+  if (sec < 3600) return Math.floor(sec / 60) + "m ago";
+  if (sec < 86400) return Math.floor(sec / 3600) + "h ago";
+  if (sec < 7 * 86400) return Math.floor(sec / 86400) + "d ago";
+  try {
+    return new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  } catch { return iso; }
+};
+const repoShort = (tag) => {
+  if (!tag) return "(unknown)";
+  const s = String(tag);
+  const slash = s.lastIndexOf("/");
+  return slash >= 0 && slash < s.length - 1 ? s.slice(slash + 1) : s;
+};
+const shortTrace = (id) => {
+  if (!id) return "";
+  const s = String(id);
+  return s.length > 14 ? s.slice(0, 14) + "…" : s;
+};
+const previewSummary = (md, n = 80) => {
+  if (!md) return "";
+  const cleaned = String(md)
+    .replace(/^#+\s*/gm, "")
+    .replace(/\*\*(.*?)\*\*/g, "$1")
+    .replace(/^-\s*/gm, "")
+    .replace(/`([^`]+)`/g, "$1")
+    .replace(/\s+/g, " ")
+    .trim();
+  return cleaned.length > n ? cleaned.slice(0, n) + "…" : cleaned;
+};
+
+// Minimal markdown renderer for the distillation memo shape:
+// `## h2/h3` → <h3>, `- bullet` → <ul><li>, `**bold**` → <strong>, `` `code` `` → <code>,
+// blank-line separated paragraphs.
+function mdToHtml(md) {
+  const lines = String(md || "").split(/\r?\n/);
+  const out = [];
+  let listOpen = false;
+  let paraBuf = [];
+  const flushPara = () => {
+    if (paraBuf.length) {
+      const text = paraBuf.join(" ");
+      out.push("<p>" + inline(text) + "</p>");
+      paraBuf = [];
+    }
+  };
+  const closeList = () => { if (listOpen) { out.push("</ul>"); listOpen = false; } };
+  const inline = (s) => escapeHtml(s)
+    .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+    .replace(/`([^`]+)`/g, "<code>$1</code>");
+  for (const raw of lines) {
+    const line = raw.trimEnd();
+    if (!line.trim()) { flushPara(); closeList(); continue; }
+    const h = line.match(/^#{2,6}\s+(.*)$/);
+    if (h) { flushPara(); closeList(); out.push("<h3>" + inline(h[1]) + "</h3>"); continue; }
+    const li = line.match(/^[-*]\s+(.*)$/);
+    if (li) {
+      flushPara();
+      if (!listOpen) { out.push("<ul>"); listOpen = true; }
+      out.push("<li>" + inline(li[1]) + "</li>");
+      continue;
+    }
+    paraBuf.push(line.trim());
+  }
+  flushPara();
+  closeList();
+  return out.join("\n");
+}
+
+const expandedProjects = new Set();
+const projectMemoryCache = new Map();
+const projectLatestSeen = new Map();
+
+async function loadMemories() {
+  let res;
+  try { res = await fetch("/memory/projects"); }
+  catch { return; }
+  if (!res.ok) return;
+  const { projects } = await res.json();
+  for (const p of projects) {
+    const last = projectLatestSeen.get(p.repoTag);
+    if (last && last !== p.latestCreatedAt) projectMemoryCache.delete(p.repoTag);
+    projectLatestSeen.set(p.repoTag, p.latestCreatedAt);
+  }
+  const totalMemories = projects.reduce((sum, p) => sum + (p.memoryCount || 0), 0);
+  $("memory-count").textContent = projects.length
+    ? `${projects.length} · ${totalMemories}`
+    : "0";
+  if (!projects.length) {
+    $("memories").innerHTML = `<div class="sidebar-empty">No distilled sessions yet.</div>`;
+    return;
+  }
+  $("memories").innerHTML = projects.map(p => {
+    const isOpen = expandedProjects.has(p.repoTag);
+    const cached = projectMemoryCache.get(p.repoTag);
+    let inner = "";
+    if (isOpen) {
+      inner = cached
+        ? renderMemoryItems(cached)
+        : `<div class="project-loading">Loading…</div>`;
+    }
+    return `
+      <div class="project-group ${isOpen ? "is-open" : ""}" data-repo="${escapeHtml(p.repoTag || "")}">
+        <div class="project-header">
+          <span class="project-chevron">▶</span>
+          <span class="project-name" title="${escapeHtml(p.repoTag || "")}">${escapeHtml(repoShort(p.repoTag))}</span>
+          <span class="project-meta">
+            <span>${escapeHtml(fmtRelTime(p.latestCreatedAt))}</span>
+            <span class="project-count">${p.memoryCount}</span>
+          </span>
+        </div>
+        <div class="project-memories">${inner}</div>
+      </div>
+    `;
+  }).join("");
+  document.querySelectorAll("#memories .project-group").forEach(group => {
+    group.querySelector(".project-header").addEventListener("click", () => {
+      toggleProject(group, group.dataset.repo);
+    });
+  });
+  wireMemoryItems($("memories"));
+  for (const repoTag of expandedProjects) {
+    if (!projectMemoryCache.has(repoTag)) fetchProjectMemories(repoTag);
+  }
+}
+
+function renderMemoryItems(memories) {
+  if (!memories.length) {
+    return `<div class="project-loading">No memories.</div>`;
+  }
+  return memories.map(m => `
+    <div class="memory-item ${m.id === selectedMemoryId ? "is-active" : ""}" data-mid="${m.id}">
+      <div class="mem-top">
+        <span>${escapeHtml(fmtRelTime(m.createdAt))}</span>
+        <span>${escapeHtml(shortTrace(m.traceId || ""))}</span>
+      </div>
+      <div class="mem-preview">${escapeHtml(previewSummary(m.summary, 80))}</div>
+    </div>
+  `).join("");
+}
+
+function wireMemoryItems(scope) {
+  scope.querySelectorAll(".memory-item").forEach(el => {
+    el.addEventListener("click", () => {
+      const id = Number(el.dataset.mid);
+      if (selectedMemoryId === id) return;
+      selectedMemoryId = id;
+      selectedTrace = null;
+      selectedNode = null;
+      document.querySelectorAll(".memory-item").forEach(x =>
+        x.classList.toggle("is-active", Number(x.dataset.mid) === selectedMemoryId));
+      document.querySelectorAll(".trace-item").forEach(x => x.classList.remove("is-active"));
+      loadMemory(id);
+    });
+  });
+}
+
+function findProjectGroup(repoTag) {
+  return [...document.querySelectorAll("#memories .project-group")]
+    .find(g => g.dataset.repo === repoTag) || null;
+}
+
+async function toggleProject(group, repoTag) {
+  if (group.classList.contains("is-open")) {
+    group.classList.remove("is-open");
+    expandedProjects.delete(repoTag);
+    return;
+  }
+  group.classList.add("is-open");
+  expandedProjects.add(repoTag);
+  const container = group.querySelector(".project-memories");
+  const cached = projectMemoryCache.get(repoTag);
+  if (cached) {
+    container.innerHTML = renderMemoryItems(cached);
+    wireMemoryItems(container);
+  } else {
+    container.innerHTML = `<div class="project-loading">Loading…</div>`;
+    fetchProjectMemories(repoTag);
+  }
+}
+
+async function fetchProjectMemories(repoTag) {
+  let res;
+  try { res = await fetch(`/memory/recent?repo=${encodeURIComponent(repoTag)}&limit=10`); }
+  catch {
+    const g = findProjectGroup(repoTag);
+    if (g) g.querySelector(".project-memories").innerHTML = `<div class="project-loading">Offline.</div>`;
+    return;
+  }
+  if (!res.ok) {
+    const g = findProjectGroup(repoTag);
+    if (g) g.querySelector(".project-memories").innerHTML = `<div class="project-loading">error ${res.status}</div>`;
+    return;
+  }
+  const { memories } = await res.json();
+  projectMemoryCache.set(repoTag, memories);
+  const g = findProjectGroup(repoTag);
+  if (g && g.classList.contains("is-open")) {
+    const container = g.querySelector(".project-memories");
+    container.innerHTML = renderMemoryItems(memories);
+    wireMemoryItems(container);
+  }
+}
+
+async function loadMemory(id) {
+  const main = $("main");
+  main.className = "main-area no-selection";
+  main.innerHTML = `<div class="empty"><p>Loading memory…</p></div>`;
+  let res;
+  try { res = await fetch(`/memory/${id}`); }
+  catch {
+    main.innerHTML = `<div class="empty"><p>Offline.</p></div>`;
+    return;
+  }
+  if (!res.ok) {
+    main.innerHTML = `<div class="empty"><p>error ${res.status}</p></div>`;
+    return;
+  }
+  const { memory } = await res.json();
+  renderMemory(memory);
+}
+
+function renderMemory(m) {
+  const meta = m.meta || {};
+  const usage = meta.usage || {};
+  const metaBits = [];
+  if (typeof meta.line_count === "number") metaBits.push(`${meta.line_count} lines`);
+  if (typeof meta.char_count === "number") metaBits.push(`${(meta.char_count/1000).toFixed(1)}k chars`);
+  if (typeof usage.total_tokens === "number") metaBits.push(`${usage.total_tokens} tokens`);
+  if (meta.model) metaBits.push(escapeHtml(String(meta.model)));
+  const subBits = [];
+  if (m.sessionId) subBits.push(`session ${escapeHtml(m.sessionId)}`);
+  if (m.traceId) subBits.push(`trace ${escapeHtml(m.traceId)}`);
+  const main = $("main");
+  main.className = "main-area no-selection";
+  currentMemory = m;
+  main.innerHTML = `
+    <div class="memory-view">
+      <div class="mv-header">
+        <div class="mv-title">${escapeHtml(m.repoTag || "(unknown repo)")}</div>
+        <div class="mv-header-right">
+          <div class="mv-actions">
+            <button class="chip" data-act="redistill" title="Re-run distillation on the source trace">redistill</button>
+            <button class="chip" data-act="edit">edit</button>
+            <button class="chip chip-danger" data-act="delete">delete</button>
+          </div>
+          ${meta.quality_warning ? `<div class="mv-warning" title="Heuristic flagged this summary as a transcript dump">⚠ ${escapeHtml(String(meta.quality_warning))}</div>` : ""}
+          <div class="mv-time">memory · #${m.id} · ${escapeHtml(fmtRelTime(m.createdAt))}</div>
+        </div>
+      </div>
+      ${subBits.length ? `<div class="mv-sub">${subBits.map(b => `<span>${b}</span>`).join("")}</div>` : ""}
+      <div class="mv-body" id="mv-body">${mdToHtml(m.summary)}</div>
+      ${metaBits.length ? `<div class="mv-meta">${metaBits.map(b => `<span>${b}</span>`).join("")}</div>` : ""}
+    </div>
+  `;
+  main.querySelector('[data-act="redistill"]').addEventListener("click", () => redistillMemory(m));
+  main.querySelector('[data-act="edit"]').addEventListener("click", beginEditMemory);
+  main.querySelector('[data-act="delete"]').addEventListener("click", () => deleteMemoryNote(m));
+}
+
+async function redistillMemory(m) {
+  if (!m || !m.id) return;
+  const btn = document.querySelector('[data-act="redistill"]');
+  if (btn) { btn.disabled = true; btn.textContent = "redistilling…"; }
+  let res;
+  try {
+    res = await fetch(`/memory/${m.id}/redistill`, { method: "POST" });
+  } catch {
+    if (btn) { btn.disabled = false; btn.textContent = "redistill"; }
+    alert("Redistill failed: network error");
+    return;
+  }
+  if (!res.ok) {
+    const detail = await res.text().catch(() => "");
+    if (btn) { btn.disabled = false; btn.textContent = "redistill"; }
+    alert(`Redistill failed: ${res.status}\n${detail.slice(0, 300)}`);
+    return;
+  }
+  const { memory } = await res.json();
+  projectMemoryCache.delete(memory.repoTag);
+  renderMemory(memory);
+  loadMemories();
+}
+
+function beginEditMemory() {
+  if (!currentMemory) return;
+  const body = $("mv-body");
+  if (!body) return;
+  body.innerHTML = `
+    <textarea class="mv-edit-textarea" id="mv-edit-textarea" spellcheck="false"></textarea>
+    <div class="mv-edit-actions">
+      <button class="chip" data-act="save">save</button>
+      <button class="chip" data-act="cancel">cancel</button>
+    </div>
+  `;
+  const ta = $("mv-edit-textarea");
+  ta.value = currentMemory.summary || "";
+  ta.focus();
+  body.querySelector('[data-act="save"]').addEventListener("click", saveMemoryEdit);
+  body.querySelector('[data-act="cancel"]').addEventListener("click", () => {
+    if (currentMemory) renderMemory(currentMemory);
+  });
+}
+
+async function saveMemoryEdit() {
+  if (!currentMemory) return;
+  const ta = $("mv-edit-textarea");
+  if (!ta) return;
+  const summary = ta.value;
+  ta.disabled = true;
+  let res;
+  try {
+    res = await fetch(`/memory/${currentMemory.id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ summary }),
+    });
+  } catch {
+    ta.disabled = false;
+    alert("Save failed: network error");
+    return;
+  }
+  if (!res.ok) {
+    ta.disabled = false;
+    alert(`Save failed: ${res.status}`);
+    return;
+  }
+  const { memory } = await res.json();
+  projectMemoryCache.delete(memory.repoTag);
+  renderMemory(memory);
+  loadMemories();
+}
+
+async function deleteMemoryNote(m) {
+  const ok = await confirmDialog({
+    title: "Delete memory?",
+    message: "This permanently removes the memory note. This cannot be undone.",
+    target: `#${m.id} · ${repoShort(m.repoTag)}`,
+    confirmLabel: "Delete",
+  });
+  if (!ok) return;
+  let res;
+  try {
+    res = await fetch(`/memory/${m.id}`, { method: "DELETE" });
+  } catch {
+    alert("Delete failed: network error");
+    return;
+  }
+  if (!res.ok) {
+    alert(`Delete failed: ${res.status}`);
+    return;
+  }
+  projectMemoryCache.delete(m.repoTag);
+  selectedMemoryId = null;
+  currentMemory = null;
+  renderEmpty();
+  loadMemories();
 }
 
 // ── Delete modal ───────────────────────────────────────────────────────
@@ -543,36 +1447,36 @@ function buildTree(events) {
   }
 
   const depth = new Map();
-  const row = new Map();
+  const col = new Map();
   let cursor = 0;
   const seenD = new Set();
-  const seenR = new Set();
+  const seenC = new Set();
   const walkDepth = (uuid, d) => {
     if (seenD.has(uuid)) return;
     seenD.add(uuid);
     depth.set(uuid, d);
     (children.get(uuid) || []).forEach(c => walkDepth(c, d + 1));
   };
-  const walkRow = (uuid) => {
-    if (seenR.has(uuid)) return;
-    seenR.add(uuid);
+  const walkCol = (uuid) => {
+    if (seenC.has(uuid)) return;
+    seenC.add(uuid);
     const kids = children.get(uuid) || [];
-    if (!kids.length) { row.set(uuid, cursor++); return; }
-    kids.forEach(walkRow);
-    row.set(uuid, (row.get(kids[0]) + row.get(kids[kids.length - 1])) / 2);
+    if (!kids.length) { col.set(uuid, cursor++); return; }
+    kids.forEach(walkCol);
+    col.set(uuid, (col.get(kids[0]) + col.get(kids[kids.length - 1])) / 2);
   };
-  roots.forEach(r => { walkDepth(r, 0); walkRow(r); cursor += 0.5; });
+  roots.forEach(r => { walkDepth(r, 0); walkCol(r); cursor += 0.5; });
 
-  const COL = 168;
-  const ROW_H = 72;
-  const PAD_X = 36;
-  const PAD_Y = 32;
+  const COL_W = 140; // horizontal spacing between sibling columns
+  const ROW_H = 100; // vertical spacing between depth rows
+  const PAD_X = 48;
+  const PAD_Y = 40;
   const nodes = lines.map(e => ({
     event: e,
     uuid: e.uuid,
     parentUuid: e.parentUuid,
-    x: PAD_X + (depth.get(e.uuid) || 0) * COL,
-    y: PAD_Y + (row.get(e.uuid) || 0) * ROW_H,
+    x: PAD_X + (col.get(e.uuid) || 0) * COL_W,
+    y: PAD_Y + (depth.get(e.uuid) || 0) * ROW_H,
   }));
   const byNode = new Map(nodes.map(n => [n.uuid, n]));
   const edges = [];
@@ -583,11 +1487,11 @@ function buildTree(events) {
   });
 
   const maxDepth = nodes.reduce((m, n) => Math.max(m, depth.get(n.uuid) || 0), 0);
-  const maxRow = nodes.reduce((m, n) => Math.max(m, row.get(n.uuid) || 0), 0);
+  const maxCol = nodes.reduce((m, n) => Math.max(m, col.get(n.uuid) || 0), 0);
   return {
     nodes, edges,
-    width: PAD_X * 2 + (maxDepth + 1) * COL,
-    height: PAD_Y * 2 + (maxRow + 1) * ROW_H,
+    width: PAD_X * 2 + (maxCol + 1) * COL_W,
+    height: PAD_Y * 2 + (maxDepth + 1) * ROW_H,
   };
 }
 
@@ -601,9 +1505,9 @@ function svgEl(tag, attrs = {}, children = []) {
 }
 
 function edgePath(e) {
-  const dx = e.to.x - e.from.x;
-  const midX = e.from.x + dx * 0.5;
-  return `M ${e.from.x + 18} ${e.from.y} C ${midX} ${e.from.y}, ${midX} ${e.to.y}, ${e.to.x - 18} ${e.to.y}`;
+  const dy = e.to.y - e.from.y;
+  const midY = e.from.y + dy * 0.5;
+  return `M ${e.from.x} ${e.from.y + 18} C ${e.from.x} ${midY}, ${e.to.x} ${midY}, ${e.to.x} ${e.to.y - 18}`;
 }
 
 function edgeKey(e) {
@@ -828,6 +1732,7 @@ function isToolResultNode(e) {
   if (text.startsWith("<local-command-caveat>")) return true;
   if (text.startsWith("<command-name>")) return true;
   if (text.startsWith("<local-command-stdout>")) return true;
+  if (text.startsWith("<system-reminder>")) return true;
   return false;
 }
 
@@ -923,7 +1828,42 @@ function compactEvents(events) {
     }
   }
   flushTools();
-  return out;
+
+  // Rewrite parentUuid through removed/merged nodes so the tree stays connected.
+  // Without this, any event whose parent was filtered (noise role, tool_result user,
+  // a non-first tool in a merged group) becomes a fake root and the tree fragments.
+  const origParent = new Map();
+  for (const e of events) {
+    if (e.uuid && e.parentUuid) origParent.set(e.uuid, e.parentUuid);
+  }
+  const remap = new Map();  // removed_uuid → surviving representative uuid
+  const kept = new Set();
+  for (const e of out) {
+    if (!e.uuid) continue;
+    kept.add(e.uuid);
+    if (e._toolGroup) {
+      for (const t of e._toolGroup) {
+        if (t.uuid && t.uuid !== e.uuid) remap.set(t.uuid, e.uuid);
+      }
+    }
+  }
+  const resolveParent = (uuid) => {
+    let cur = origParent.get(uuid);
+    const seen = new Set();
+    while (cur) {
+      if (seen.has(cur)) return null;
+      seen.add(cur);
+      if (remap.has(cur)) return remap.get(cur);
+      if (kept.has(cur)) return cur;
+      cur = origParent.get(cur);
+    }
+    return null;
+  };
+  return out.map(e => {
+    if (!e.uuid || e.type !== "transcript.line") return e;
+    const np = resolveParent(e.uuid);
+    return np === e.parentUuid ? e : { ...e, parentUuid: np || undefined };
+  });
 }
 
 function renderTrace() {
@@ -1394,7 +2334,7 @@ async function ensureFullEvent(uuid) {
   return event;
 }
 
-$("refresh").addEventListener("click", () => { loadTraces(); loadDetail(); });
+$("refresh").addEventListener("click", () => { loadTraces(); loadMemories(); loadCgRepos(); if (selectedTrace) loadDetail(); });
 $("auto").addEventListener("change", (e) => { if (e.target.checked) startAuto(); else stopAuto(); });
 
 document.addEventListener("click", (e) => {
@@ -1407,12 +2347,1254 @@ document.addEventListener("click", (e) => {
 });
 function startAuto() {
   stopAuto();
-  autoTimer = setInterval(() => { loadTraces(); if (selectedTrace) loadDetail(); }, 2000);
+  autoTimer = setInterval(() => {
+    loadTraces();
+    if (selectedTrace) loadDetail();
+    memoryTick = (memoryTick + 1) % 2;
+    // Refresh memories every other tick (~4s) when a memory isn't being read.
+    if (memoryTick === 0 && selectedMemoryId === null) loadMemories();
+  }, 2000);
 }
 function stopAuto() { if (autoTimer) { clearInterval(autoTimer); autoTimer = null; } }
 
+// ── Memory entity graph ───────────────────────────────────────────────
+const GRAPH_TYPE_LABELS = {
+  repo: "repos",
+  memory: "memories",
+  file: "files",
+  decision: "decisions",
+  thread: "open threads",
+  gotcha: "gotchas",
+};
+const GRAPH_TYPE_VARS = {
+  repo: "var(--gn-repo)",
+  memory: "var(--gn-memory)",
+  file: "var(--gn-file)",
+  decision: "var(--gn-decision)",
+  thread: "var(--gn-thread)",
+  gotcha: "var(--gn-gotcha)",
+};
+const GRAPH_FILTERABLE = ["file", "decision", "thread", "gotcha"];
+
+const graphState = {
+  initialized: false,
+  loaded: false,
+  loading: null,
+  rawNodes: [],
+  rawEdges: [],
+  nodes: [],
+  links: [],
+  sim: null,
+  svg: null,
+  layers: { edges: null, nodes: null },
+  nodeById: new Map(),
+  enabled: new Set(["file", "decision", "thread", "gotcha"]),
+  repo: "",
+  selectedId: null,
+  hoverId: null,
+  rafPending: false,
+};
+
+function graphInit() {
+  if (graphState.initialized) return;
+  graphState.initialized = true;
+
+  // Build entity-type chips.
+  const chipsEl = $("graph-types");
+  chipsEl.innerHTML = GRAPH_FILTERABLE.map(t => `
+    <button class="graph-type-chip is-on" data-gt="${t}" style="--gtc-color: ${GRAPH_TYPE_VARS[t]}">
+      <span class="graph-type-dot"></span>${escapeHtml(GRAPH_TYPE_LABELS[t])}
+    </button>
+  `).join("");
+  chipsEl.addEventListener("click", (e) => {
+    const btn = e.target.closest(".graph-type-chip");
+    if (!btn) return;
+    const t = btn.dataset.gt;
+    if (graphState.enabled.has(t)) graphState.enabled.delete(t);
+    else graphState.enabled.add(t);
+    btn.classList.toggle("is-on");
+    graphApplyFilter();
+  });
+
+  $("graph-repo").addEventListener("change", (e) => {
+    graphState.repo = e.target.value;
+    graphLoad(true);
+  });
+
+  // SVG setup with d3-zoom for pan/zoom.
+  const svg = d3.select("#graph-svg");
+  graphState.svg = svg;
+
+  const defs = svg.append("defs");
+  defs.append("marker")
+    .attr("id", "graph-arrow")
+    .attr("viewBox", "0 0 10 10")
+    .attr("refX", 14).attr("refY", 5)
+    .attr("markerWidth", 4).attr("markerHeight", 4)
+    .attr("orient", "auto")
+    .append("path").attr("d", "M0,0 L10,5 L0,10 z").attr("fill", "var(--muted-2)");
+
+  const root = svg.append("g").attr("class", "graph-root");
+  graphState.layers.edges = root.append("g").attr("class", "graph-edges");
+  graphState.layers.nodes = root.append("g").attr("class", "graph-nodes");
+
+  svg.call(d3.zoom()
+    .scaleExtent([0.3, 3])
+    .filter((event) => !event.target.closest(".gn-group"))
+    .on("zoom", (event) => root.attr("transform", event.transform)));
+
+  svg.on("click", (event) => {
+    if (event.target === svg.node()) {
+      graphState.selectedId = null;
+      graphRenderDetail();
+      graphTick();
+    }
+  });
+
+  window.addEventListener("resize", graphResizeViewBox);
+}
+
+function graphResizeViewBox() {
+  const canvas = $("graph-canvas");
+  if (!canvas) return;
+  const w = canvas.clientWidth || 800;
+  const h = canvas.clientHeight || 600;
+  graphState.svg.attr("viewBox", `0 0 ${w} ${h}`);
+  if (graphState.sim) {
+    graphState.sim.force("center", d3.forceCenter(w / 2, h / 2));
+    graphState.sim.alpha(0.4).restart();
+  }
+}
+
+async function graphLoad(force = false) {
+  if (graphState.loading) return graphState.loading;
+  if (graphState.loaded && !force) return;
+  const params = new URLSearchParams({ limit: "200" });
+  if (graphState.repo) params.set("repo", graphState.repo);
+  const url = `/memory/graph?${params}`;
+  const p = (async () => {
+    let res;
+    try { res = await fetch(url); }
+    catch (e) {
+      $("graph-stats").textContent = "load failed: " + e.message;
+      return;
+    }
+    if (!res.ok) {
+      $("graph-stats").textContent = "load failed: " + res.status;
+      return;
+    }
+    const data = await res.json();
+    graphState.rawNodes = data.nodes || [];
+    graphState.rawEdges = data.edges || [];
+    graphPopulateRepoSelect();
+    graphRunSim();
+    graphRenderStats(data.stats || {});
+    graphRenderDetail();
+    graphState.loaded = true;
+  })().finally(() => { graphState.loading = null; });
+  graphState.loading = p;
+  return p;
+}
+
+function graphPopulateRepoSelect() {
+  // Build repo list from raw nodes (only when "all repos" is the current filter,
+  // so that a per-repo fetch doesn't shrink the dropdown).
+  if (graphState.repo) return;
+  const sel = $("graph-repo");
+  const repos = graphState.rawNodes
+    .filter((n) => n.kind === "repo")
+    .sort((a, b) => (b.memoryCount || 0) - (a.memoryCount || 0));
+  const opts = ['<option value="">all repos</option>']
+    .concat(repos.map((r) =>
+      `<option value="${escapeHtml(r.label)}">${escapeHtml(r.label)} · ${r.memoryCount}</option>`
+    ));
+  sel.innerHTML = opts.join("");
+  sel.value = graphState.repo;
+}
+
+function graphRenderStats(stats) {
+  const counts = {};
+  for (const n of graphState.rawNodes) counts[n.kind] = (counts[n.kind] || 0) + 1;
+  const lines = [
+    `<span class="gs-num">${counts.memory || 0}</span> memories`,
+    `<span class="gs-num">${counts.repo || 0}</span> repos`,
+    `<span class="gs-num">${counts.file || 0}</span> files`,
+    `<span class="gs-num">${counts.decision || 0}</span> decisions`,
+    `<span class="gs-num">${counts.thread || 0}</span> open threads`,
+    `<span class="gs-num">${counts.gotcha || 0}</span> gotchas`,
+  ];
+  $("graph-stats").innerHTML = lines.join("<br/>");
+}
+
+function graphRunSim() {
+  // Stop previous simulation.
+  if (graphState.sim) graphState.sim.stop();
+
+  // Clone nodes (d3-force mutates).
+  const nodes = graphState.rawNodes.map((n) => ({ ...n }));
+  const idIndex = new Map(nodes.map((n) => [n.id, n]));
+  const links = graphState.rawEdges
+    .map((e) => ({ source: idIndex.get(e.source), target: idIndex.get(e.target), kind: e.kind }))
+    .filter((l) => l.source && l.target);
+
+  graphState.nodes = nodes;
+  graphState.links = links;
+  graphState.nodeById = idIndex;
+
+  const canvas = $("graph-canvas");
+  const w = canvas.clientWidth || 800;
+  const h = canvas.clientHeight || 600;
+  graphState.svg.attr("viewBox", `0 0 ${w} ${h}`);
+
+  const sim = d3.forceSimulation(nodes)
+    .force("link", d3.forceLink(links)
+      .id((d) => d.id)
+      .distance((l) => (l.kind === "member" ? 70 : l.kind === "touched" ? 90 : 60))
+      .strength((l) => (l.kind === "member" ? 0.7 : l.kind === "touched" ? 0.25 : 0.4)))
+    .force("charge", d3.forceManyBody().strength(-260))
+    .force("center", d3.forceCenter(w / 2, h / 2))
+    .force("collide", d3.forceCollide().radius((d) => graphNodeRadius(d) + 4))
+    .alpha(1)
+    .alphaDecay(0.025);
+
+  sim.on("tick", () => {
+    if (graphState.rafPending) return;
+    graphState.rafPending = true;
+    requestAnimationFrame(() => {
+      graphState.rafPending = false;
+      graphTick();
+    });
+  });
+
+  graphState.sim = sim;
+  graphRenderShell();
+  graphApplyFilter();
+}
+
+function graphNodeRadius(n) {
+  if (n.kind === "repo") return 16 + Math.min(10, (n.memoryCount || 0) * 1.2);
+  if (n.kind === "memory") return 9;
+  if (n.kind === "file") return 6 + Math.min(8, (n.count || 1) * 1.1);
+  return 5;
+}
+
+function graphRenderShell() {
+  const edges = graphState.layers.edges
+    .selectAll("line.graph-edge")
+    .data(graphState.links, (l) => `${l.source.id}::${l.target.id}::${l.kind}`);
+  edges.exit().remove();
+  edges.enter()
+    .append("line")
+    .attr("class", "graph-edge")
+    .attr("data-kind", (l) => l.kind)
+    .attr("stroke", (l) => {
+      if (l.kind === "member") return "var(--border-strong)";
+      if (l.kind === "touched") return "var(--accent-blue)";
+      if (l.kind === "decided") return "var(--accent-amber)";
+      if (l.kind === "thread") return "var(--gn-thread)";
+      if (l.kind === "gotcha") return "var(--accent-red)";
+      return "var(--muted-2)";
+    })
+    .attr("stroke-width", (l) => l.kind === "member" ? 1 : l.kind === "touched" ? 1.4 : 1)
+    .attr("stroke-dasharray", (l) =>
+      (l.kind === "decided" || l.kind === "thread" || l.kind === "gotcha") ? "3 2" : "0")
+    .attr("opacity", 0.5);
+
+  const groups = graphState.layers.nodes
+    .selectAll("g.gn-group")
+    .data(graphState.nodes, (n) => n.id);
+  groups.exit().remove();
+  const enter = groups.enter()
+    .append("g")
+    .attr("class", "gn-group")
+    .attr("data-id", (n) => n.id)
+    .style("cursor", "pointer")
+    .on("click", (event, n) => {
+      event.stopPropagation();
+      graphState.selectedId = n.id;
+      graphRenderDetail();
+      graphTick();
+    })
+    .on("mouseenter", (event, n) => {
+      graphState.hoverId = n.id;
+      graphTick();
+    })
+    .on("mouseleave", () => {
+      graphState.hoverId = null;
+      graphTick();
+    })
+    .call(d3.drag()
+      .on("start", (event, d) => {
+        if (!event.active) graphState.sim.alphaTarget(0.3).restart();
+        d.fx = d.x; d.fy = d.y;
+      })
+      .on("drag", (event, d) => {
+        d.fx = event.x; d.fy = event.y;
+      })
+      .on("end", (event, d) => {
+        if (!event.active) graphState.sim.alphaTarget(0);
+        d.fx = null; d.fy = null;
+      }));
+
+  enter.append("circle")
+    .attr("class", "gn-circle")
+    .attr("r", (n) => graphNodeRadius(n))
+    .attr("fill", (n) => GRAPH_TYPE_VARS[n.kind] || "var(--muted)")
+    .attr("stroke", "var(--bg)")
+    .attr("stroke-width", 1.5);
+
+  enter.filter((n) => n.kind === "repo")
+    .append("text")
+    .attr("class", "gn-count")
+    .attr("text-anchor", "middle").attr("y", 4)
+    .attr("font-size", 10).attr("font-family", "var(--font-mono)")
+    .attr("fill", "var(--bg)")
+    .style("pointer-events", "none")
+    .text((n) => n.memoryCount);
+
+  enter.append("text")
+    .attr("class", (n) => "gn-label" + (n.kind === "repo" || n.kind === "file" ? " is-hub" : ""))
+    .attr("text-anchor", "middle")
+    .attr("dy", (n) => graphNodeRadius(n) + 11)
+    .text((n) => truncateGraphLabel(n.label, n.kind === "repo" ? 22 : n.kind === "file" ? 26 : 30));
+}
+
+function truncateGraphLabel(s, n) {
+  const t = (s || "").trim();
+  return t.length > n ? t.slice(0, n - 1) + "…" : t;
+}
+
+function graphTick() {
+  graphState.layers.edges.selectAll("line.graph-edge")
+    .attr("x1", (l) => l.source.x)
+    .attr("y1", (l) => l.source.y)
+    .attr("x2", (l) => l.target.x)
+    .attr("y2", (l) => l.target.y);
+
+  graphState.layers.nodes.selectAll("g.gn-group")
+    .attr("transform", (n) => `translate(${n.x || 0},${n.y || 0})`);
+
+  graphApplyHighlight();
+}
+
+function graphApplyHighlight() {
+  const sel = graphState.selectedId;
+  const hov = graphState.hoverId;
+  const focus = sel || hov;
+  graphState.layers.nodes.selectAll("g.gn-group")
+    .each(function(n) {
+      const isFocus = focus && n.id === focus;
+      const c = d3.select(this).select("circle");
+      c.attr("stroke", isFocus ? "var(--ink)" : "var(--bg)")
+       .attr("stroke-width", isFocus ? 2 : 1.5);
+      d3.select(this).select(".gn-label")
+        .classed("is-active", isFocus);
+    });
+  if (focus) {
+    graphState.layers.edges.selectAll("line.graph-edge")
+      .attr("opacity", (l) => (l.source.id === focus || l.target.id === focus) ? 0.95 : 0.12);
+  } else {
+    graphState.layers.edges.selectAll("line.graph-edge")
+      .attr("opacity", 0.5);
+  }
+}
+
+function graphApplyFilter() {
+  graphState.layers.nodes.selectAll("g.gn-group")
+    .style("display", (n) => graphNodeVisible(n) ? null : "none");
+  graphState.layers.edges.selectAll("line.graph-edge")
+    .style("display", (l) =>
+      (graphNodeVisible(l.source) && graphNodeVisible(l.target)) ? null : "none");
+}
+
+function graphNodeVisible(n) {
+  if (!n) return false;
+  if (n.kind === "repo" || n.kind === "memory") return true;
+  return graphState.enabled.has(n.kind);
+}
+
+function graphRenderDetail() {
+  const pane = $("graph-detail");
+  const id = graphState.selectedId;
+  if (!id) {
+    pane.innerHTML = `<div class="graph-detail-empty">click any node to inspect.</div>`;
+    return;
+  }
+  const n = graphState.nodeById.get(id);
+  if (!n) {
+    pane.innerHTML = `<div class="graph-detail-empty">node not found.</div>`;
+    return;
+  }
+  if (n.kind === "memory") return graphRenderMemoryDetail(n);
+  if (n.kind === "repo") return graphRenderRepoDetail(n);
+  if (n.kind === "file") return graphRenderEntityDetail(n, "file");
+  if (n.kind === "decision") return graphRenderEntityDetail(n, "decision");
+  if (n.kind === "thread") return graphRenderEntityDetail(n, "open thread");
+  if (n.kind === "gotcha") return graphRenderEntityDetail(n, "gotcha");
+}
+
+async function graphRenderMemoryDetail(n) {
+  const pane = $("graph-detail");
+  pane.innerHTML = `
+    <div class="graph-detail-head">
+      <div class="graph-detail-kind" style="--gtc-color: ${GRAPH_TYPE_VARS.memory}">
+        <span class="graph-detail-kind-dot"></span>memory · #${n.memoryId}
+      </div>
+      <div class="graph-detail-title">${escapeHtml(n.label || ("memory #" + n.memoryId))}</div>
+      <div class="graph-detail-meta">${escapeHtml(n.repoTag || "")} · ${escapeHtml(fmtRelTime(n.createdAt))}</div>
+    </div>
+    <div class="graph-detail-body" id="graph-detail-body"><span class="muted mono">loading…</span></div>
+  `;
+  let res;
+  try { res = await fetch(`/memory/${n.memoryId}`); }
+  catch (e) {
+    document.getElementById("graph-detail-body").innerHTML = `<span class="muted">failed: ${escapeHtml(e.message)}</span>`;
+    return;
+  }
+  if (!res.ok) {
+    document.getElementById("graph-detail-body").innerHTML = `<span class="muted">error ${res.status}</span>`;
+    return;
+  }
+  const { memory } = await res.json();
+  if (graphState.selectedId !== n.id) return; // selection changed
+  const body = document.getElementById("graph-detail-body");
+  if (body) body.innerHTML = mdToHtml(memory.summary);
+}
+
+function graphRenderRepoDetail(n) {
+  const memories = graphState.rawNodes
+    .filter((x) => x.kind === "memory" && x.repoTag === n.label)
+    .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
+  const pane = $("graph-detail");
+  pane.innerHTML = `
+    <div class="graph-detail-head">
+      <div class="graph-detail-kind" style="--gtc-color: ${GRAPH_TYPE_VARS.repo}">
+        <span class="graph-detail-kind-dot"></span>repo
+      </div>
+      <div class="graph-detail-title">${escapeHtml(n.label)}</div>
+      <div class="graph-detail-meta">${memories.length} memor${memories.length === 1 ? "y" : "ies"} in view</div>
+    </div>
+    <div class="graph-detail-body">
+      <h3>Memories</h3>
+      ${memories.map((m) => graphBacklinkHTML(m)).join("")}
+      <div style="margin-top:14px"><button class="btn" data-graph-filter-repo="${escapeHtml(n.label)}">filter graph to this repo</button></div>
+    </div>
+  `;
+  pane.querySelectorAll(".graph-backlink").forEach((el) =>
+    el.addEventListener("click", () => graphSelectMemory(Number(el.dataset.memId))));
+  const filterBtn = pane.querySelector("[data-graph-filter-repo]");
+  if (filterBtn) filterBtn.addEventListener("click", () => {
+    graphState.repo = filterBtn.dataset.graphFilterRepo;
+    $("graph-repo").value = graphState.repo;
+    graphLoad(true);
+  });
+}
+
+function graphRenderEntityDetail(n, label) {
+  const pane = $("graph-detail");
+  // Find every memory that links to this node.
+  const memIds = new Set();
+  for (const e of graphState.rawEdges) {
+    if (e.target === n.id && e.source.startsWith("mem:")) {
+      memIds.add(Number(e.source.slice(4)));
+    }
+  }
+  const memories = graphState.rawNodes.filter((x) => x.kind === "memory" && memIds.has(x.memoryId));
+  pane.innerHTML = `
+    <div class="graph-detail-head">
+      <div class="graph-detail-kind" style="--gtc-color: ${GRAPH_TYPE_VARS[n.kind]}">
+        <span class="graph-detail-kind-dot"></span>${escapeHtml(label)}
+      </div>
+      <div class="graph-detail-title">${escapeHtml(n.text || n.label)}</div>
+      <div class="graph-detail-meta">${memories.length} memor${memories.length === 1 ? "y" : "ies"}${n.count ? ` · referenced ${n.count}×` : ""}</div>
+    </div>
+    <div class="graph-detail-body">
+      <h3>Mentioned in</h3>
+      ${memories.map((m) => graphBacklinkHTML(m)).join("") || '<span class="muted">no backlinks</span>'}
+    </div>
+  `;
+  pane.querySelectorAll(".graph-backlink").forEach((el) =>
+    el.addEventListener("click", () => graphSelectMemory(Number(el.dataset.memId))));
+}
+
+function graphBacklinkHTML(m) {
+  return `
+    <button class="graph-backlink" data-mem-id="${m.memoryId}">
+      <div>${escapeHtml(m.label || ("memory #" + m.memoryId))}</div>
+      <div class="graph-backlink-meta">${escapeHtml(m.repoTag || "")} · ${escapeHtml(fmtRelTime(m.createdAt))}</div>
+    </button>
+  `;
+}
+
+function graphSelectMemory(memoryId) {
+  const id = `mem:${memoryId}`;
+  const node = graphState.nodeById.get(id);
+  if (!node) return;
+  graphState.selectedId = id;
+  graphRenderDetail();
+  graphTick();
+}
+
+// fmtRelTime — used by memory rendering, defined in the memory section.
+// Re-declare a fallback here if it doesn't exist (defensive — it should).
+if (typeof fmtRelTime !== "function") {
+  window.fmtRelTime = (iso) => { try { return new Date(iso).toLocaleString(); } catch { return String(iso || ""); } };
+}
+
+// ── View toggle (trace ↔ graph) ───────────────────────────────────────
+function setView(view, opts = {}) {
+  const isGraph = view === "graph";
+  $("sidebar").style.display = isGraph ? "none" : "";
+  $("main").style.display = isGraph ? "none" : "";
+  $("graph-view").classList.toggle("is-active", isGraph);
+  $("view-trace").classList.toggle("chip-on", !isGraph);
+  $("view-graph").classList.toggle("chip-on", isGraph);
+  if (!opts.silent) location.hash = isGraph ? "#graph" : "#trace";
+  if (isGraph) {
+    graphInit();
+    graphLoad();
+    // ResizeObserver fires after layout; nudge once.
+    requestAnimationFrame(graphResizeViewBox);
+  }
+}
+$("view-trace").addEventListener("click", () => setView("trace"));
+$("view-graph").addEventListener("click", () => setView("graph"));
+window.addEventListener("hashchange", () => {
+  setView(location.hash === "#graph" ? "graph" : "trace", { silent: true });
+});
+
+// ── Code graph ────────────────────────────────────────────────────────
+
+let selectedCgRepo = null;
+let selectedCgFile = null;
+let selectedCgSymbol = null;
+let cgIndexingPolls = new Map(); // repoTag → intervalId
+
+const repoShortLabel = (tag) => {
+  if (!tag) return "(unknown)";
+  const s = String(tag);
+  // host/org/name → org/name; bare path → last 2 segments
+  const parts = s.split("/").filter(Boolean);
+  if (parts.length <= 2) return s;
+  return parts.slice(-2).join("/");
+};
+
+async function loadCgRepos() {
+  let res;
+  try { res = await fetch("/codegraph/repos"); }
+  catch { return; }
+  if (!res.ok) return;
+  const { repos } = await res.json();
+  const mount = $("cg-repos");
+  if (!repos.length) {
+    mount.innerHTML = `<div class="sidebar-empty">No indexed repos yet.</div>`;
+    return;
+  }
+  mount.innerHTML = repos.map((r) => {
+    const counts = r.status === "ready"
+      ? `${r.fileCount} f · ${r.symbolCount} s`
+      : "";
+    return `
+      <div class="cg-item ${r.repoTag === selectedCgRepo ? "is-active" : ""}" data-tag="${escapeHtml(r.repoTag)}">
+        <div class="cg-actions">
+          <button class="cg-action" data-act="reindex" title="Re-index">↻</button>
+          <button class="cg-action cg-danger" data-act="delete" title="Delete">✕</button>
+        </div>
+        <div class="cg-name" title="${escapeHtml(r.repoTag)}">${escapeHtml(repoShortLabel(r.repoTag))}</div>
+        <div class="cg-meta">
+          <span class="cg-status cg-status-${escapeHtml(r.status)}">${escapeHtml(r.status)}</span>
+          <span>${counts}</span>
+        </div>
+      </div>
+    `;
+  }).join("");
+
+  mount.querySelectorAll(".cg-item").forEach((el) => {
+    el.addEventListener("click", (e) => {
+      const act = e.target.closest("[data-act]")?.dataset.act;
+      const tag = el.dataset.tag;
+      if (act === "reindex") { e.stopPropagation(); reindexCgRepo(tag); return; }
+      if (act === "delete")  { e.stopPropagation(); deleteCgRepo(tag); return; }
+      selectCgRepo(tag);
+    });
+  });
+
+  // Auto-poll any repo that's still pending/indexing.
+  for (const r of repos) {
+    if (r.status === "pending" || r.status === "indexing") {
+      startCgPoll(r.repoTag);
+    }
+  }
+}
+
+function startCgPoll(tag) {
+  if (cgIndexingPolls.has(tag)) return;
+  const id = setInterval(async () => {
+    let res;
+    try { res = await fetch(`/codegraph/repo?tag=${encodeURIComponent(tag)}`); }
+    catch { return; }
+    if (!res.ok) return;
+    const { repo } = await res.json();
+    if (!repo) return;
+    if (repo.status === "ready" || repo.status === "failed") {
+      clearInterval(id);
+      cgIndexingPolls.delete(tag);
+      loadCgRepos();
+      if (repo.status === "ready" && selectedCgRepo === tag) {
+        loadCgFiles(tag);
+      }
+    }
+  }, 1500);
+  cgIndexingPolls.set(tag, id);
+}
+
+function showCgIndexForm() {
+  const mount = $("cg-form-mount");
+  if (mount.querySelector(".cg-form")) return; // already open
+  mount.innerHTML = `
+    <div class="cg-form">
+      <label>Repo tag (e.g. github.com/you/proj)</label>
+      <input id="cg-form-tag" placeholder="github.com/you/proj" autocomplete="off" />
+      <label>Absolute path on the server</label>
+      <input id="cg-form-path" placeholder="/path/to/repo" autocomplete="off" />
+      <div class="cg-form-actions">
+        <button class="chip" data-act="cancel">cancel</button>
+        <button class="chip chip-on" data-act="submit">index</button>
+      </div>
+    </div>
+  `;
+  mount.querySelector('[data-act="cancel"]').addEventListener("click", () => mount.innerHTML = "");
+  mount.querySelector('[data-act="submit"]').addEventListener("click", submitCgIndex);
+  $("cg-form-tag").focus();
+}
+
+async function submitCgIndex() {
+  const tag = $("cg-form-tag").value.trim();
+  const path = $("cg-form-path").value.trim();
+  if (!tag || !path) {
+    alert("Both a repo tag and a path are required.");
+    return;
+  }
+  let res;
+  try {
+    res = await fetch("/codegraph/index", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ repoTag: tag, path }),
+    });
+  } catch {
+    alert("Index failed: network error");
+    return;
+  }
+  if (!res.ok) {
+    const detail = await res.text().catch(() => "");
+    alert(`Index failed: ${res.status}\n${detail.slice(0, 300)}`);
+    return;
+  }
+  $("cg-form-mount").innerHTML = "";
+  loadCgRepos();
+  startCgPoll(tag);
+}
+
+async function reindexCgRepo(tag) {
+  let res;
+  try {
+    res = await fetch(`/codegraph/repo/reindex?tag=${encodeURIComponent(tag)}`, { method: "POST" });
+  } catch { alert("Reindex failed: network error"); return; }
+  if (!res.ok) { alert(`Reindex failed: ${res.status}`); return; }
+  loadCgRepos();
+  startCgPoll(tag);
+}
+
+async function deleteCgRepo(tag) {
+  const ok = await confirmDialog({
+    title: "Delete code graph?",
+    message: "This drops the entire indexed graph for this repo.",
+    target: tag,
+    confirmLabel: "Delete",
+  });
+  if (!ok) return;
+  let res;
+  try {
+    res = await fetch(`/codegraph/repo?tag=${encodeURIComponent(tag)}`, { method: "DELETE" });
+  } catch { alert("Delete failed: network error"); return; }
+  if (!res.ok) { alert(`Delete failed: ${res.status}`); return; }
+  if (selectedCgRepo === tag) {
+    selectedCgRepo = null; selectedCgFile = null; selectedCgSymbol = null;
+    renderEmpty();
+  }
+  loadCgRepos();
+}
+
+function selectCgRepo(tag) {
+  if (selectedCgRepo === tag) return;
+  selectedCgRepo = tag; selectedCgFile = null; selectedCgSymbol = null;
+  selectedTrace = null; selectedMemoryId = null;
+  document.querySelectorAll(".cg-item").forEach((x) =>
+    x.classList.toggle("is-active", x.dataset.tag === tag));
+  document.querySelectorAll(".trace-item").forEach((x) => x.classList.remove("is-active"));
+  document.querySelectorAll(".memory-item").forEach((x) => x.classList.remove("is-active"));
+  renderCgView(tag);
+  loadCgFiles(tag);
+}
+
+let cgViewMode = "list"; // "list" | "graph"
+
+function renderCgView(tag) {
+  const main = $("main");
+  main.className = "main-area";
+  main.innerHTML = `
+    <div class="cg-shell">
+      <div class="cg-toolbar">
+        <span class="cg-repo-label" title="${escapeHtml(tag)}">${escapeHtml(repoShortLabel(tag))}</span>
+        <span class="divider-v"></span>
+        <div class="cg-mode-tabs">
+          <button data-mode="list" class="${cgViewMode === "list" ? "is-on" : ""}">▤ list</button>
+          <button data-mode="graph" class="${cgViewMode === "graph" ? "is-on" : ""}">◈ graph</button>
+        </div>
+        <span class="divider-v"></span>
+        <div class="cg-search-wrap">
+          <div class="cg-search">
+            <input id="cg-search-input" placeholder="search symbols…" autocomplete="off" />
+            <button class="cg-search-mode" id="cg-search-mode" title="Toggle semantic search">name</button>
+          </div>
+          <div id="cg-search-results"></div>
+        </div>
+      </div>
+      <div class="cg-mode-body" id="cg-mode-body"></div>
+    </div>
+  `;
+  main.querySelectorAll(".cg-mode-tabs button").forEach((btn) => {
+    btn.addEventListener("click", () => setCgMode(btn.dataset.mode, tag));
+  });
+
+  const searchInput = $("cg-search-input");
+  const searchMode = $("cg-search-mode");
+  let searchTimer = null;
+  searchInput.addEventListener("input", () => {
+    clearTimeout(searchTimer);
+    const q = searchInput.value.trim();
+    if (q.length < 2) { $("cg-search-results").innerHTML = ""; return; }
+    const delay = searchMode.classList.contains("is-on") ? 350 : 120;
+    searchTimer = setTimeout(() => runCgSearch(tag, q, searchMode.classList.contains("is-on") ? "semantic" : "name"), delay);
+  });
+  searchMode.addEventListener("click", () => {
+    searchMode.classList.toggle("is-on");
+    searchMode.textContent = searchMode.classList.contains("is-on") ? "semantic" : "name";
+    if (searchInput.value.trim().length >= 2) {
+      runCgSearch(tag, searchInput.value.trim(), searchMode.classList.contains("is-on") ? "semantic" : "name");
+    }
+  });
+  document.addEventListener("click", (e) => {
+    if (!e.target.closest(".cg-search-wrap")) $("cg-search-results").innerHTML = "";
+  });
+
+  setCgMode(cgViewMode, tag);
+}
+
+function setCgMode(mode, tag) {
+  cgViewMode = mode;
+  document.querySelectorAll(".cg-mode-tabs button").forEach((b) =>
+    b.classList.toggle("is-on", b.dataset.mode === mode));
+  const body = $("cg-mode-body");
+  if (!body) return;
+  if (mode === "list") {
+    body.innerHTML = `
+      <div class="code-view">
+        <div class="code-pane">
+          <div class="code-pane-header"><span>Files</span></div>
+          <div class="code-pane-body" id="cg-files"><div class="cg-empty">Loading…</div></div>
+        </div>
+        <div class="code-pane">
+          <div class="code-pane-header"><span id="cg-symbols-title">Symbols</span></div>
+          <div class="code-pane-body" id="cg-symbols"><div class="cg-empty">Select a file.</div></div>
+        </div>
+        <div class="code-pane">
+          <div class="code-pane-header"><span>Detail</span></div>
+          <div class="code-pane-body" id="cg-detail"><div class="cg-empty">Select a symbol.</div></div>
+        </div>
+      </div>
+    `;
+    loadCgFiles(tag);
+  } else {
+    body.innerHTML = `
+      <div class="cg-graph-view">
+        <div class="cg-graph-canvas" id="cg-graph-canvas">
+          <svg id="cg-graph-svg"></svg>
+          <div class="cg-graph-legend">
+            <span><span class="leg-line is-import"></span> import</span>
+            <span><span class="leg-line is-call"></span> call</span>
+            <span class="muted">drag · scroll to zoom</span>
+          </div>
+        </div>
+        <aside class="cg-graph-detail" id="cg-graph-detail">
+          <div class="cg-graph-empty">Loading…</div>
+        </aside>
+      </div>
+    `;
+    loadCgGraph(tag);
+  }
+}
+
+async function runCgSearch(tag, q, mode) {
+  const mount = $("cg-search-results");
+  if (!mount) return;
+  mount.innerHTML = `<div class="cg-search-result" style="cursor:default"><span class="muted">searching…</span></div>`;
+  let res;
+  try {
+    res = await fetch(`/codegraph/search?tag=${encodeURIComponent(tag)}&q=${encodeURIComponent(q)}&mode=${mode}`);
+  } catch { mount.innerHTML = `<div class="cg-search-result" style="cursor:default"><span class="muted">network error</span></div>`; return; }
+  if (!res.ok) {
+    const detail = await res.text().catch(() => "");
+    if (mode === "semantic" && res.status === 503) {
+      mount.innerHTML = `<div class="cg-search-result" style="cursor:default"><span class="muted">semantic search unavailable — embeddings not yet built</span></div>`;
+    } else {
+      mount.innerHTML = `<div class="cg-search-result" style="cursor:default"><span class="muted">search failed (${res.status})</span></div>`;
+    }
+    return;
+  }
+  const { results } = await res.json();
+  if (!results.length) {
+    mount.innerHTML = `<div class="cg-search-result" style="cursor:default"><span class="muted">no matches</span></div>`;
+    return;
+  }
+  mount.innerHTML = results.map((r) => `
+    <button class="cg-search-result" data-sid="${r.id}" data-fid="${r.fileId}" data-fpath="${escapeHtml(r.filePath)}">
+      ${typeof r.distance === "number" ? `<span class="cg-search-result-dist">${r.distance.toFixed(3)}</span>` : ""}
+      <div><span class="cg-sym-kind kind-${escapeHtml(r.kind)}">${escapeHtml(r.kind)}</span> ${escapeHtml(r.qualifiedName || r.name)}</div>
+      <div class="cg-search-result-meta">${escapeHtml(r.filePath)}:${r.startLine}</div>
+    </button>
+  `).join("");
+  mount.querySelectorAll(".cg-search-result").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const sid = Number(btn.dataset.sid);
+      const fid = Number(btn.dataset.fid);
+      const fpath = btn.dataset.fpath;
+      mount.innerHTML = "";
+      $("cg-search-input").value = "";
+      if (cgViewMode !== "list") setCgMode("list", selectedCgRepo);
+      // Wait for list to be rendered before drilling.
+      setTimeout(() => {
+        selectCgFile(fid, fpath).then(() => selectCgSymbol(sid));
+      }, 30);
+    });
+  });
+}
+
+// ── Code graph: D3 force layout ─────────────────────────────────────
+const cgGraphState = {
+  svg: null, root: null, layers: { edges: null, nodes: null },
+  sim: null, nodes: [], links: [], nodeById: null,
+  selectedFileId: null, hoverFileId: null, rafPending: false,
+};
+
+const CG_LANG_COLORS = {
+  typescript: "var(--accent-blue)",
+  tsx: "var(--accent-blue)",
+  javascript: "var(--accent-amber)",
+  python: "var(--accent-green)",
+};
+
+function cgNodeColor(n) { return CG_LANG_COLORS[n.language] || "var(--muted)"; }
+function cgNodeRadius(n) { return 4 + Math.min(14, Math.sqrt(Math.max(0, n.symbolCount || 0)) * 2.5); }
+
+async function loadCgGraph(tag) {
+  const detail = $("cg-graph-detail");
+  let res;
+  try { res = await fetch(`/codegraph/repo/edges?tag=${encodeURIComponent(tag)}`); }
+  catch { detail.innerHTML = `<div class="cg-graph-empty">Network error.</div>`; return; }
+  if (!res.ok) { detail.innerHTML = `<div class="cg-graph-empty">Failed to load (${res.status}).</div>`; return; }
+  const { nodes, edges } = await res.json();
+  if (!nodes.length) {
+    detail.innerHTML = `<div class="cg-graph-empty">No files indexed.</div>`;
+    return;
+  }
+  detail.innerHTML = `
+    <div class="cg-graph-empty">
+      Click any file node.<br/>
+      <div class="cg-graph-stat" style="margin-top:14px">
+        ${nodes.length} files · ${edges.length} edges
+      </div>
+    </div>
+  `;
+  cgRunGraphSim(nodes, edges);
+}
+
+function cgRunGraphSim(rawNodes, rawEdges) {
+  if (cgGraphState.sim) cgGraphState.sim.stop();
+
+  const svgEl = $("cg-graph-svg");
+  if (!svgEl) return;
+  const svg = d3.select(svgEl);
+  svg.selectAll("*").remove();
+
+  const defs = svg.append("defs");
+  defs.append("marker")
+    .attr("id", "cg-arrow")
+    .attr("viewBox", "0 0 10 10")
+    .attr("refX", 14).attr("refY", 5)
+    .attr("markerWidth", 4).attr("markerHeight", 4)
+    .attr("orient", "auto")
+    .append("path").attr("d", "M0,0 L10,5 L0,10 z").attr("fill", "var(--muted-2)");
+
+  const root = svg.append("g").attr("class", "cg-graph-root");
+  cgGraphState.layers.edges = root.append("g").attr("class", "cg-edges");
+  cgGraphState.layers.nodes = root.append("g").attr("class", "cg-nodes");
+
+  svg.call(d3.zoom()
+    .scaleExtent([0.2, 4])
+    .filter((event) => !event.target.closest(".cgn-group"))
+    .on("zoom", (event) => root.attr("transform", event.transform)));
+
+  svg.on("click", (event) => {
+    if (event.target === svgEl) {
+      cgGraphState.selectedFileId = null;
+      cgRenderGraphDetail(null);
+      cgGraphTick();
+    }
+  });
+
+  cgGraphState.svg = svg;
+  cgGraphState.root = root;
+
+  const nodes = rawNodes.map((n) => ({ ...n, _id: String(n.id) }));
+  const idIndex = new Map(nodes.map((n) => [n.id, n]));
+  cgGraphState.nodeById = idIndex;
+
+  const links = rawEdges
+    .map((e) => ({ source: idIndex.get(e.source), target: idIndex.get(e.target), kind: e.kind, weight: e.weight || 1 }))
+    .filter((l) => l.source && l.target && l.source !== l.target);
+
+  cgGraphState.nodes = nodes;
+  cgGraphState.links = links;
+
+  const canvas = $("cg-graph-canvas");
+  const w = canvas.clientWidth || 800;
+  const h = canvas.clientHeight || 600;
+  svg.attr("viewBox", `0 0 ${w} ${h}`);
+
+  const sim = d3.forceSimulation(nodes)
+    .force("link", d3.forceLink(links)
+      .id((d) => d.id)
+      .distance((l) => l.kind === "import" ? 60 : 100)
+      .strength((l) => l.kind === "import" ? 0.6 : 0.2))
+    .force("charge", d3.forceManyBody().strength(-220))
+    .force("center", d3.forceCenter(w / 2, h / 2))
+    .force("collide", d3.forceCollide().radius((d) => cgNodeRadius(d) + 4))
+    .alpha(1)
+    .alphaDecay(0.03);
+
+  sim.on("tick", () => {
+    if (cgGraphState.rafPending) return;
+    cgGraphState.rafPending = true;
+    requestAnimationFrame(() => {
+      cgGraphState.rafPending = false;
+      cgGraphTick();
+    });
+  });
+
+  cgGraphState.sim = sim;
+  cgRenderGraphShell();
+}
+
+function cgRenderGraphShell() {
+  const edges = cgGraphState.layers.edges
+    .selectAll("line.cg-edge")
+    .data(cgGraphState.links, (l) => `${l.source.id}::${l.target.id}::${l.kind}`);
+  edges.exit().remove();
+  edges.enter()
+    .append("line")
+    .attr("class", "cg-edge")
+    .attr("data-kind", (l) => l.kind)
+    .attr("stroke", (l) => l.kind === "call" ? "var(--accent-blue)" : "var(--border-strong)")
+    .attr("stroke-width", (l) => l.kind === "call" ? Math.min(3, 0.6 + Math.log2(l.weight + 1) * 0.6) : 1)
+    .attr("stroke-dasharray", (l) => l.kind === "call" ? "3 2" : "0")
+    .attr("opacity", 0.45)
+    .attr("marker-end", "url(#cg-arrow)");
+
+  const groups = cgGraphState.layers.nodes
+    .selectAll("g.cgn-group")
+    .data(cgGraphState.nodes, (n) => n.id);
+  groups.exit().remove();
+  const enter = groups.enter()
+    .append("g")
+    .attr("class", "cgn-group")
+    .attr("data-id", (n) => n.id)
+    .style("cursor", "pointer")
+    .on("click", (event, n) => {
+      event.stopPropagation();
+      cgGraphState.selectedFileId = n.id;
+      cgRenderGraphDetail(n);
+      cgGraphTick();
+    })
+    .on("mouseenter", (event, n) => {
+      cgGraphState.hoverFileId = n.id;
+      cgGraphTick();
+    })
+    .on("mouseleave", () => {
+      cgGraphState.hoverFileId = null;
+      cgGraphTick();
+    })
+    .call(d3.drag()
+      .on("start", (event, d) => {
+        if (!event.active) cgGraphState.sim.alphaTarget(0.3).restart();
+        d.fx = d.x; d.fy = d.y;
+      })
+      .on("drag", (event, d) => { d.fx = event.x; d.fy = event.y; })
+      .on("end", (event, d) => {
+        if (!event.active) cgGraphState.sim.alphaTarget(0);
+        d.fx = null; d.fy = null;
+      }));
+
+  enter.append("circle")
+    .attr("class", "cgn-circle")
+    .attr("r", (n) => cgNodeRadius(n))
+    .attr("fill", (n) => cgNodeColor(n))
+    .attr("stroke", "var(--bg)")
+    .attr("stroke-width", 1.5);
+
+  enter.append("text")
+    .attr("class", "cgn-label")
+    .attr("text-anchor", "middle")
+    .attr("dy", (n) => cgNodeRadius(n) + 11)
+    .text((n) => {
+      const segs = n.path.split("/");
+      return segs[segs.length - 1];
+    });
+}
+
+function cgGraphTick() {
+  cgGraphState.layers.edges.selectAll("line.cg-edge")
+    .attr("x1", (l) => l.source.x).attr("y1", (l) => l.source.y)
+    .attr("x2", (l) => l.target.x).attr("y2", (l) => l.target.y);
+  cgGraphState.layers.nodes.selectAll("g.cgn-group")
+    .attr("transform", (n) => `translate(${n.x || 0},${n.y || 0})`);
+
+  const focus = cgGraphState.selectedFileId || cgGraphState.hoverFileId;
+  cgGraphState.layers.nodes.selectAll("g.cgn-group")
+    .each(function(n) {
+      const isFocus = focus && n.id === focus;
+      d3.select(this).select("circle")
+        .attr("stroke", isFocus ? "var(--ink)" : "var(--bg)")
+        .attr("stroke-width", isFocus ? 2 : 1.5);
+      d3.select(this).select(".cgn-label").classed("is-focus", isFocus);
+    });
+  if (focus) {
+    cgGraphState.layers.edges.selectAll("line.cg-edge")
+      .attr("opacity", (l) => (l.source.id === focus || l.target.id === focus) ? 0.95 : 0.1);
+  } else {
+    cgGraphState.layers.edges.selectAll("line.cg-edge").attr("opacity", 0.45);
+  }
+}
+
+async function cgRenderGraphDetail(node) {
+  const detail = $("cg-graph-detail");
+  if (!detail) return;
+  if (!node) {
+    detail.innerHTML = `<div class="cg-graph-empty">Click any file node.</div>`;
+    return;
+  }
+  detail.innerHTML = `
+    <div style="margin-bottom: 12px;">
+      <div class="cg-detail-title" title="${escapeHtml(node.path)}">${escapeHtml(node.path)}</div>
+      <div class="cg-detail-loc">${escapeHtml(node.language)} · ${node.symbolCount} symbols</div>
+    </div>
+    <button class="chip" id="cg-graph-open-list">↗ open in list view</button>
+    <h3 style="margin-top:18px;">Symbols</h3>
+    <div id="cg-graph-symbols"><div class="cg-empty">Loading…</div></div>
+    <h3>Touched in memories</h3>
+    <div id="cg-graph-mems"><div class="cg-empty">…</div></div>
+  `;
+  $("cg-graph-open-list").addEventListener("click", () => {
+    setCgMode("list", selectedCgRepo);
+    setTimeout(() => selectCgFile(node.id, node.path), 40);
+  });
+
+  // Load symbols
+  fetch(`/codegraph/symbols?fileId=${node.id}`).then((r) => r.ok ? r.json() : { symbols: [] }).then((d) => {
+    const mount = $("cg-graph-symbols"); if (!mount) return;
+    if (!d.symbols?.length) { mount.innerHTML = `<div class="cg-empty">No symbols.</div>`; return; }
+    mount.innerHTML = `<div class="cg-impact-list">` + d.symbols.slice(0, 30).map((s) => `
+      <button class="cg-impact-row" data-sid="${s.id}">
+        <span class="cg-sym-kind kind-${escapeHtml(s.kind)}">${escapeHtml(s.kind)}</span>
+        ${escapeHtml(s.qualifiedName || s.name)}
+      </button>
+    `).join("") + `</div>`;
+    mount.querySelectorAll(".cg-impact-row").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const sid = Number(btn.dataset.sid);
+        setCgMode("list", selectedCgRepo);
+        setTimeout(() => selectCgFile(node.id, node.path).then(() => selectCgSymbol(sid)), 40);
+      });
+    });
+  });
+
+  // Load memory cross-refs
+  fetch(`/codegraph/file/memories?fileId=${node.id}`).then((r) => r.ok ? r.json() : { memories: [] }).then((d) => {
+    const mount = $("cg-graph-mems"); if (!mount) return;
+    if (!d.memories?.length) { mount.innerHTML = `<div class="cg-empty">No matching memories.</div>`; return; }
+    mount.innerHTML = d.memories.slice(0, 10).map((m) => {
+      const date = new Date(m.createdAt).toLocaleDateString();
+      const preview = (m.summary || "").slice(0, 140).replace(/\s+/g, " ");
+      return `<div class="cg-mem-row">
+        <div class="cg-mem-meta">${escapeHtml(date)} · ${escapeHtml(m.kind)}</div>
+        <div>${escapeHtml(preview)}${preview.length >= 140 ? "…" : ""}</div>
+      </div>`;
+    }).join("");
+  });
+}
+
+async function loadCgFiles(tag) {
+  let res;
+  try { res = await fetch(`/codegraph/files?tag=${encodeURIComponent(tag)}`); }
+  catch { return; }
+  if (!res.ok) return;
+  const { files } = await res.json();
+  const mount = $("cg-files");
+  if (!mount) return;
+  if (!files.length) {
+    mount.innerHTML = `<div class="cg-empty">No files indexed.</div>`;
+    return;
+  }
+  mount.innerHTML = files.map((f) => `
+    <div class="cg-file-row ${f.id === selectedCgFile ? "is-active" : ""}" data-id="${f.id}">
+      <div class="cg-file-path" title="${escapeHtml(f.path)}">${escapeHtml(f.path)}</div>
+      <div class="cg-file-meta">${escapeHtml(f.language)} · ${f.symbolCount} sym</div>
+    </div>
+  `).join("");
+  mount.querySelectorAll(".cg-file-row").forEach((el) => {
+    el.addEventListener("click", () => selectCgFile(Number(el.dataset.id), el.querySelector(".cg-file-path").textContent));
+  });
+}
+
+async function selectCgFile(fileId, label) {
+  selectedCgFile = fileId; selectedCgSymbol = null;
+  document.querySelectorAll(".cg-file-row").forEach((x) =>
+    x.classList.toggle("is-active", Number(x.dataset.id) === fileId));
+  $("cg-symbols-title").textContent = `Symbols · ${label || ""}`;
+  $("cg-detail").innerHTML = `<div class="cg-empty">Select a symbol.</div>`;
+  let res;
+  try { res = await fetch(`/codegraph/symbols?fileId=${fileId}`); }
+  catch { return; }
+  if (!res.ok) return;
+  const { symbols } = await res.json();
+  const mount = $("cg-symbols");
+  if (!symbols.length) {
+    mount.innerHTML = `<div class="cg-empty">No symbols in this file.</div>`;
+    return;
+  }
+  mount.innerHTML = symbols.map((s) => `
+    <div class="cg-sym-row" data-id="${s.id}">
+      <div class="cg-sym-name">
+        <span class="cg-sym-kind kind-${escapeHtml(s.kind)}">${escapeHtml(s.kind)}</span>
+        <span>${escapeHtml(s.qualifiedName || s.name)}</span>
+      </div>
+      ${s.signature ? `<div class="cg-sym-sig" title="${escapeHtml(s.signature)}">${escapeHtml(s.signature)}</div>` : ""}
+    </div>
+  `).join("");
+  mount.querySelectorAll(".cg-sym-row").forEach((el) => {
+    el.addEventListener("click", () => selectCgSymbol(Number(el.dataset.id)));
+  });
+}
+
+async function selectCgSymbol(id) {
+  selectedCgSymbol = id;
+  document.querySelectorAll(".cg-sym-row").forEach((x) =>
+    x.classList.toggle("is-active", Number(x.dataset.id) === id));
+  let res;
+  try { res = await fetch(`/codegraph/symbol/${id}`); }
+  catch { return; }
+  if (!res.ok) return;
+  const { symbol, callers, callees } = await res.json();
+  const renderRow = (r) => {
+    const ext = r.external || !r.symbolId;
+    const cls = ext ? "cg-call-row is-external" : "cg-call-row";
+    const target = ext ? `${escapeHtml(r.name || "?")}` : `${escapeHtml(r.qualifiedName || r.name)}`;
+    const loc = r.filePath ? `${escapeHtml(r.filePath)}:${r.line || r.startLine || ""}` : `(external) ${escapeHtml(r.name || "")}`;
+    return `<button class="${cls}" data-sid="${r.symbolId || ""}" data-fid="${r.fileId || ""}" ${ext ? "disabled" : ""}>
+      <div>${target}</div>
+      <div class="cg-call-loc">${loc}</div>
+    </button>`;
+  };
+  $("cg-detail").innerHTML = `
+    <div class="cg-detail">
+      <div class="cg-detail-title">${escapeHtml(symbol.qualifiedName || symbol.name)}</div>
+      <div class="cg-detail-loc">
+        <span class="cg-sym-kind kind-${escapeHtml(symbol.kind)}">${escapeHtml(symbol.kind)}</span>
+        ${escapeHtml(symbol.file.path)}:${symbol.startLine}–${symbol.endLine}
+      </div>
+      ${symbol.signature ? `<div class="cg-detail-sig">${escapeHtml(symbol.signature)}</div>` : ""}
+      ${symbol.docstring ? `<div class="cg-detail-sig">${escapeHtml(symbol.docstring)}</div>` : ""}
+      <h3>Callers (${callers.length})</h3>
+      ${callers.length ? callers.map(renderRow).join("") : `<div class="cg-empty">No callers found.</div>`}
+      <h3>Callees (${callees.length})</h3>
+      ${callees.length ? callees.map(renderRow).join("") : `<div class="cg-empty">No outgoing calls.</div>`}
+      <h3>Transitive impact <button class="cg-search-mode" id="cg-impact-load" data-sid="${id}">load</button></h3>
+      <div id="cg-impact-mount"><div class="cg-empty">depth 1 callers/callees shown above. Click load for full reachability.</div></div>
+    </div>
+  `;
+  $("cg-detail").querySelectorAll(".cg-call-row").forEach((btn) => {
+    if (btn.disabled) return;
+    btn.addEventListener("click", () => {
+      const sid = Number(btn.dataset.sid);
+      const fid = Number(btn.dataset.fid);
+      if (fid && fid !== selectedCgFile) {
+        const fileRow = document.querySelector(`.cg-file-row[data-id="${fid}"]`);
+        const label = fileRow ? fileRow.querySelector(".cg-file-path").textContent : "";
+        selectCgFile(fid, label).then(() => { if (sid) selectCgSymbol(sid); });
+      } else if (sid) {
+        selectCgSymbol(sid);
+      }
+    });
+  });
+  const impactBtn = $("cg-impact-load");
+  if (impactBtn) impactBtn.addEventListener("click", () => loadCgImpact(Number(impactBtn.dataset.sid)));
+}
+
+async function loadCgImpact(symbolId) {
+  const mount = $("cg-impact-mount");
+  if (!mount) return;
+  mount.innerHTML = `<div class="cg-empty">Loading…</div>`;
+  let res;
+  try { res = await fetch(`/codegraph/impact?symbolId=${symbolId}&depth=4`); }
+  catch { mount.innerHTML = `<div class="cg-empty">network error</div>`; return; }
+  if (!res.ok) { mount.innerHTML = `<div class="cg-empty">failed (${res.status})</div>`; return; }
+  const { callers, callees } = await res.json();
+  const renderImpactRow = (r) => `
+    <button class="cg-impact-row" data-sid="${r.symbolId}" data-fid="${r.fileId}" data-fpath="${escapeHtml(r.filePath)}">
+      <span class="cg-impact-depth">d${r.depth}</span>
+      <span class="cg-sym-kind kind-${escapeHtml(r.kind)}">${escapeHtml(r.kind)}</span>
+      ${escapeHtml(r.qualifiedName || r.name)}
+    </button>
+  `;
+  mount.innerHTML = `
+    <div style="font-size:10.5px; color:var(--muted); margin-top:6px;">Upstream callers (${callers.length})</div>
+    <div class="cg-impact-list">
+      ${callers.length ? callers.map(renderImpactRow).join("") : `<div class="cg-empty">none</div>`}
+    </div>
+    <div style="font-size:10.5px; color:var(--muted); margin-top:8px;">Downstream callees (${callees.length})</div>
+    <div class="cg-impact-list">
+      ${callees.length ? callees.map(renderImpactRow).join("") : `<div class="cg-empty">none</div>`}
+    </div>
+  `;
+  mount.querySelectorAll(".cg-impact-row").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const sid = Number(btn.dataset.sid);
+      const fid = Number(btn.dataset.fid);
+      const fpath = btn.dataset.fpath;
+      if (fid !== selectedCgFile) selectCgFile(fid, fpath).then(() => selectCgSymbol(sid));
+      else selectCgSymbol(sid);
+    });
+  });
+}
+
+$("cg-index-btn").addEventListener("click", showCgIndexForm);
+
 loadTraces();
+loadMemories();
+loadCgRepos();
 startAuto();
+setView(location.hash === "#graph" ? "graph" : "trace", { silent: true });
 </script>
 </body>
 </html>
