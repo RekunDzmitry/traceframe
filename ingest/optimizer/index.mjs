@@ -10,6 +10,10 @@ import { resolveRules } from "./rules.mjs";
 export { analyzePrompt } from "./analyzer.mjs";
 export { runExperiment } from "./runner.mjs";
 export { resolveRules, PROFILES, DEFAULT_PROFILE } from "./rules.mjs";
+export { runPipeline } from "./pipeline.mjs";
+export { detectContentType, routeMessages } from "./content-router.mjs";
+export { selectContext } from "./context-selector.mjs";
+export { evaluateSession, buildHandoff } from "./session-guard.mjs";
 
 /**
  * Apply all active optimization techniques to a structured prompt.

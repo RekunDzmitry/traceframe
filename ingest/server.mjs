@@ -10,6 +10,7 @@
 //   POST /optimizer/analyze       → token-waste report for a structured prompt
 //   POST /optimizer/optimize      → apply compression techniques, return optimized prompt
 //   POST /optimizer/experiment    → A/B run: original vs optimized via OpenCode provider
+//   POST /optimizer/pipeline      → full 4-layer pipeline (router→compress→select→guard)
 
 import { createServer } from "node:http";
 import { readFileSync } from "node:fs";
@@ -18,7 +19,7 @@ import { fileURLToPath } from "node:url";
 import pg from "pg";
 import { indexRepo } from "./codegraph/indexer.mjs";
 import { embedQuery, vectorLiteral } from "./codegraph/embedder.mjs";
-import { analyzePrompt, applyOptimizations, runExperiment } from "./optimizer/index.mjs";
+import { analyzePrompt, applyOptimizations, runExperiment, runPipeline } from "./optimizer/index.mjs";
 
 const { Pool } = pg;
 
@@ -1382,6 +1383,13 @@ const handleOptimizerExperiment = async (req, res) => {
   return json(res, 200, result);
 };
 
+const handleOptimizerPipeline = async (req, res) => {
+  const body = JSON.parse(await readBody(req));
+  const { system, messages, tools, profile, query, keywords, sessionTurns, handoffCtx } = body;
+  const result = runPipeline({ system, messages, tools, profile, query, keywords, sessionTurns, handoffCtx });
+  return json(res, 200, result);
+};
+
 const server = createServer(async (req, res) => {
   try {
     const url = new URL(req.url, `http://${req.headers.host}`);
@@ -1403,6 +1411,7 @@ const server = createServer(async (req, res) => {
     if (path === "/optimizer/analyze" && req.method === "POST") return handleOptimizerAnalyze(req, res);
     if (path === "/optimizer/optimize" && req.method === "POST") return handleOptimizerOptimize(req, res);
     if (path === "/optimizer/experiment" && req.method === "POST") return handleOptimizerExperiment(req, res);
+    if (path === "/optimizer/pipeline" && req.method === "POST") return handleOptimizerPipeline(req, res);
     if (path === "/traces" && req.method === "GET") return handleListTraces(req, res);
     if (path === "/memory/recent" && req.method === "GET") return handleGetMemoryRecent(req, res);
     if (path === "/memory/projects" && req.method === "GET") return handleGetMemoryProjects(req, res);
