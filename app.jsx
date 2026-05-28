@@ -1,6 +1,10 @@
 // Main app — wires together sidebar + tree + detail + branch panel + tweaks.
 
-const { useState: useS, useEffect: useE } = React;
+const { useState: useS, useEffect: useE, useCallback: useCB } = React;
+
+const BRANCH_API = window.location.origin.startsWith("http")
+  ? "" // same-origin → relative URLs
+  : "http://localhost:4000";
 
 const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
   "variant": "default",
@@ -33,7 +37,7 @@ function TopBar({ trace, view, onView }) {
   );
 }
 
-function Sidebar({ activeTrace, onSelect }) {
+function Sidebar({ activeTrace, onSelect, experiments, onLoadExperiment, onDeleteExperiment }) {
   return (
     <aside className="sidebar">
       <div className="sidebar-section">
@@ -62,19 +66,48 @@ function Sidebar({ activeTrace, onSelect }) {
         ))}
       </div>
       <div className="sidebar-section">
-        <div className="sidebar-section-label"><span>Saved experiments</span><span className="mono">3</span></div>
-        <div className="trace-item">
-          <div className="trace-title">Cheap model sweep</div>
-          <div className="trace-meta"><span className="mono">haiku / gpt-5-mini</span></div>
+        <div className="sidebar-section-label">
+          <span>Saved experiments</span>
+          <span className="mono">{experiments.length}</span>
         </div>
-        <div className="trace-item">
-          <div className="trace-title">Prompt A/B: planner v2</div>
-          <div className="trace-meta"><span className="mono">2 branches</span></div>
-        </div>
-        <div className="trace-item">
-          <div className="trace-title">Temperature ladder</div>
-          <div className="trace-meta"><span className="mono">0.0 → 1.0</span></div>
-        </div>
+        {experiments.length === 0 && (
+          <div className="trace-meta muted" style={{ padding: "6px 10px" }}>
+            None yet — save from the branch panel.
+          </div>
+        )}
+        {experiments.map((exp) => {
+          const models = exp.specs.map((s) => s.model).filter(Boolean);
+          const uniqModels = [...new Set(models)];
+          return (
+            <div
+              key={exp.id}
+              className="trace-item"
+              onClick={() => onLoadExperiment(exp)}
+              title="click to load into branch panel"
+            >
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                <div className="trace-title">{exp.name}</div>
+                <span
+                  className="icon-btn-sm"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (window.confirm(`Delete experiment "${exp.name}"?`)) onDeleteExperiment(exp.id);
+                  }}
+                  title="delete"
+                >
+                  ✕
+                </span>
+              </div>
+              <div className="trace-meta">
+                <span className="mono">
+                  {exp.specs.length} variant{exp.specs.length > 1 ? "s" : ""}
+                </span>
+                {uniqModels.length > 0 && <span>·</span>}
+                <span className="mono">{uniqModels.slice(0, 2).join(" / ")}</span>
+              </div>
+            </div>
+          );
+        })}
       </div>
       <div className="sidebar-section">
         <div className="sidebar-section-label"><span>Metrics (24h)</span></div>
@@ -139,9 +172,62 @@ function App() {
   const [showBranches, setShowBranches] = useS(true);
   const [tweaks, setTweaks] = useS(TWEAK_DEFAULTS);
   const [view, setView] = useS(localStorage.getItem("view") || "trace");
+  const [nodes, setNodes] = useS(window.NODES);
+  const [experiments, setExperiments] = useS([]);
+  const [pendingSpecs, setPendingSpecs] = useS(null);
 
   useE(() => { localStorage.setItem("selNode", selectedNode); }, [selectedNode]);
   useE(() => { localStorage.setItem("view", view); }, [view]);
+
+  // Load persisted branch nodes for the active trace.
+  useE(() => {
+    let cancelled = false;
+    fetch(`${BRANCH_API}/branch/nodes?traceId=${encodeURIComponent(activeTrace)}`)
+      .then((r) => (r.ok ? r.json() : { nodes: [] }))
+      .then(({ nodes: persisted }) => {
+        if (cancelled || !persisted?.length) return;
+        setNodes((prev) => {
+          const existing = new Set(prev.map((n) => n.id));
+          const fresh = persisted.filter((n) => !existing.has(n.id));
+          if (!fresh.length) return prev;
+          window.NODES = [...prev, ...fresh];
+          return window.NODES;
+        });
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [activeTrace]);
+
+  const refreshExperiments = useCB(() => {
+    fetch(`${BRANCH_API}/experiments`)
+      .then((r) => (r.ok ? r.json() : { experiments: [] }))
+      .then(({ experiments }) => setExperiments(experiments || []))
+      .catch(() => {});
+  }, []);
+  useE(() => {
+    refreshExperiments();
+    const h = () => refreshExperiments();
+    window.addEventListener("experiments:changed", h);
+    return () => window.removeEventListener("experiments:changed", h);
+  }, [refreshExperiments]);
+
+  const handleLoadExperiment = (exp) => {
+    setPendingSpecs(exp.specs);
+    setBranchOpen(true);
+  };
+  const handleDeleteExperiment = async (id) => {
+    await fetch(`${BRANCH_API}/experiments/${encodeURIComponent(id)}`, { method: "DELETE" });
+    refreshExperiments();
+  };
+  const handleSaveTemplate = async ({ name, specs }) => {
+    const r = await fetch(`${BRANCH_API}/experiments`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name, specs }),
+    });
+    if (!r.ok) throw new Error(await r.text());
+    refreshExperiments();
+  };
 
   // Edit mode protocol
   useE(() => {
@@ -156,13 +242,46 @@ function App() {
   }, []);
 
   const trace = window.TRACES.find((t) => t.id === activeTrace);
-  const node = window.NODES.find((n) => n.id === selectedNode);
+  const node = nodes.find((n) => n.id === selectedNode);
+
+  const handleBranchSubmit = async (specs) => {
+    const r = await fetch(`${BRANCH_API}/branch/run`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        sourceNodeId: node.id,
+        traceId: trace.id,
+        parentNodeId: node.parent || "",
+        variants: specs,
+      }),
+    });
+    if (!r.ok) {
+      const detail = await r.text().catch(() => "");
+      window.alert(`branch run failed: ${r.status} ${detail.slice(0, 200)}`);
+      return;
+    }
+    const { nodes: newNodes } = await r.json();
+    setNodes((prev) => {
+      const merged = [...prev, ...newNodes];
+      window.NODES = merged;
+      return merged;
+    });
+    if (newNodes[0]?.id) setSelectedNode(newNodes[0].id);
+    setBranchOpen(false);
+    setPendingSpecs(null);
+  };
 
   return (
     <div className="app" data-variant={tweaks.variant} data-density={tweaks.density}>
       <TopBar trace={trace} view={view} onView={setView} />
       <div className="workspace">
-        <Sidebar activeTrace={activeTrace} onSelect={setActiveTrace} />
+        <Sidebar
+          activeTrace={activeTrace}
+          onSelect={setActiveTrace}
+          experiments={experiments}
+          onLoadExperiment={handleLoadExperiment}
+          onDeleteExperiment={handleDeleteExperiment}
+        />
         {view === "trace" && (
           <div className={`main-area ${branchOpen ? "with-branch" : "no-branch"}`}>
             <TreePanel
@@ -171,19 +290,26 @@ function App() {
               showBranches={showBranches}
               onToggleBranches={() => setShowBranches((v) => !v)}
               variant={tweaks.treeStyle}
+              nodes={nodes}
             />
             <NodeDetail
               node={node}
-              onBranch={() => setBranchOpen((v) => !v)}
+              onBranch={() => {
+                setPendingSpecs(null);
+                setBranchOpen((v) => !v);
+              }}
               branchOpen={branchOpen}
-              allNodes={window.NODES}
+              allNodes={nodes}
             />
             {branchOpen && (
               <BranchPanel
+                key={pendingSpecs ? "loaded" : "fresh"}
                 node={node}
-                allNodes={window.NODES}
-                onClose={() => setBranchOpen(false)}
-                onSubmit={() => { setBranchOpen(false); alert("Branch queued — it would appear as a new node in the tree."); }}
+                allNodes={nodes}
+                onClose={() => { setBranchOpen(false); setPendingSpecs(null); }}
+                onSubmit={handleBranchSubmit}
+                onSaveTemplate={handleSaveTemplate}
+                initialSpecs={pendingSpecs}
               />
             )}
           </div>

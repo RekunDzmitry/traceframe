@@ -224,10 +224,14 @@ button, input, textarea, select { font-family: inherit; font-size: inherit; colo
   padding: 2px 8px; border-radius: 100px;
   font-family: var(--font-mono);
 }
-.chip-danger:hover {
-  background: var(--accent-red-soft);
+.chip.chip-danger {
   color: var(--accent-red);
-  border-color: var(--accent-red-soft);
+  border-color: var(--accent-red);
+}
+.chip.chip-danger:hover {
+  background: var(--accent-red);
+  color: var(--bg);
+  border-color: var(--accent-red);
 }
 .mv-edit-textarea {
   width: 100%; min-height: 240px; box-sizing: border-box;
@@ -437,6 +441,148 @@ button, input, textarea, select { font-family: inherit; font-size: inherit; colo
   background: var(--accent-red); color: #fff; border-color: var(--accent-red);
 }
 .btn-danger:hover { filter: brightness(0.95); }
+.btn-ghost { background: transparent; border-color: var(--border); }
+.btn-ghost:hover { background: var(--surface-2); }
+.btn-primary { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+.btn-primary:hover { filter: brightness(0.92); background: var(--ink); }
+.btn[disabled] { opacity: 0.5; cursor: not-allowed; }
+
+/* ── Branch panel ─────────────────────────────────────── */
+.main-area.with-branch { grid-template-columns: 1.2fr 0.9fr 1.1fr; }
+.branch-panel {
+  display: flex; flex-direction: column;
+  border-left: 1px solid var(--border);
+  overflow: hidden; min-width: 0;
+  background: var(--bg);
+}
+.branch-body { flex: 1; overflow-y: auto; padding: 12px; }
+.branch-section {
+  margin-bottom: 16px; padding-bottom: 12px;
+  border-bottom: 1px dashed var(--border);
+}
+.branch-section:last-child { border-bottom: none; }
+.branch-section .section-head {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 6px;
+}
+
+.variant-tabs {
+  display: flex; gap: 4px; flex-wrap: wrap;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+.variant-tab {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 4px 8px;
+  background: var(--bg); border: 1px solid var(--border);
+  border-radius: 3px; cursor: pointer;
+  font-family: var(--font-mono); font-size: 11px;
+  color: var(--muted);
+}
+.variant-tab:hover { border-color: var(--border-strong); color: var(--ink); }
+.variant-tab.is-active { background: var(--surface-2); border-color: var(--ink); color: var(--ink); }
+.variant-tab-letter {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 16px; height: 16px; border-radius: 50%;
+  background: var(--ink); color: var(--bg);
+  font-size: 9.5px; font-weight: 600;
+}
+.variant-tab.is-active .variant-tab-letter { background: var(--accent-green); }
+.variant-tab-model { font-size: 10.5px; }
+.variant-tab-x {
+  margin-left: 2px; color: var(--muted); font-size: 13px; line-height: 1;
+  padding: 0 2px;
+}
+.variant-tab-x:hover { color: var(--ink); }
+.variant-tab-add { color: var(--muted); border-style: dashed; }
+.variant-tab-add:hover { color: var(--ink); border-color: var(--border-strong); }
+
+.model-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; }
+.model-card {
+  text-align: left; padding: 7px 9px;
+  background: var(--bg); border: 1px solid var(--border); border-radius: 3px;
+  cursor: pointer; display: grid; gap: 2px;
+}
+.model-card:hover { border-color: var(--border-strong); }
+.model-card.is-selected { border-color: var(--ink); background: var(--surface-2); }
+.model-name { font-size: 11.5px; font-weight: 500; color: var(--ink); font-family: var(--font-mono); }
+.model-meta { font-size: 10px; color: var(--muted); display: flex; gap: 4px; font-family: var(--font-mono); }
+
+.row-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.slider {
+  width: 100%; -webkit-appearance: none; appearance: none;
+  height: 4px; background: var(--border); border-radius: 2px; outline: none;
+}
+.slider::-webkit-slider-thumb {
+  -webkit-appearance: none; width: 12px; height: 12px; border-radius: 50%;
+  background: var(--ink); cursor: pointer;
+}
+
+.msg-list { display: grid; gap: 6px; }
+.msg {
+  background: var(--bg); border: 1px solid var(--border); border-radius: 3px;
+  overflow: hidden;
+}
+.msg-off { opacity: 0.5; }
+.msg-head {
+  display: flex; align-items: center; gap: 6px;
+  padding: 4px 8px;
+  background: var(--surface); border-bottom: 1px solid var(--border);
+  font-size: 11px;
+}
+.msg-head select {
+  background: var(--bg); border: 1px solid var(--border); padding: 1px 4px;
+  border-radius: 2px; font-family: var(--font-mono); font-size: 10.5px;
+}
+.msg-head input[type="checkbox"] { margin: 0; }
+.msg-body {
+  width: 100%; border: none; outline: none; resize: vertical;
+  padding: 6px 8px; background: transparent;
+  font-family: var(--font-mono); font-size: 11.5px; line-height: 1.45;
+  display: block; box-sizing: border-box;
+}
+.user-msg { border: 1px solid var(--border); background: var(--bg); border-radius: 3px; }
+.msg-preview {
+  padding: 6px 8px; color: var(--muted); font-size: 11px; line-height: 1.4;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-family: var(--font-mono);
+}
+.ctx-hint { font-size: 10px; margin-bottom: 6px; color: var(--muted); font-family: var(--font-mono); }
+
+.icon-btn-sm {
+  background: transparent; border: none; cursor: pointer;
+  color: var(--muted); padding: 0 4px; font-size: 12px;
+}
+.icon-btn-sm:hover { color: var(--ink); }
+
+.chip-mini {
+  background: transparent; border: 1px solid var(--border);
+  border-radius: 3px; padding: 1px 6px;
+  font-size: 10px; cursor: pointer; color: var(--muted);
+  font-family: var(--font-mono);
+}
+.chip-mini:hover { color: var(--ink); border-color: var(--border-strong); }
+
+.estimate { background: var(--surface); padding: 10px; border-radius: 3px; border-bottom: none; }
+.estimate-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px 12px; }
+
+.branch-footer {
+  display: flex; gap: 8px; justify-content: flex-end;
+  padding: 10px 12px;
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+  flex-shrink: 0;
+}
+
+.branch-running {
+  border: 1px dashed var(--accent-amber);
+  border-radius: 3px;
+  padding: 6px 10px;
+  font-size: 11px; color: var(--muted);
+  font-family: var(--font-mono);
+  margin: 8px 12px 0;
+}
 @keyframes fadeIn { from { opacity: 0 } to { opacity: 1 } }
 
 /* ── Code graph (sidebar + main view) ────────── */
@@ -824,6 +970,9 @@ button, input, textarea, select { font-family: inherit; font-size: inherit; colo
       <button class="chip chip-on" id="view-trace" title="Trace + memory browser">◎ traces</button>
       <button class="chip" id="view-graph" title="Memory entity graph">◈ graph</button>
       <span class="divider-v"></span>
+      <button class="chip chip-danger" id="clear-traces" title="Delete all traces">✕ traces</button>
+      <button class="chip chip-danger" id="clear-memory" title="Delete all memory notes">✕ memory</button>
+      <span class="divider-v"></span>
       <label class="auto-label"><input type="checkbox" id="auto" checked/> auto-refresh 2s</label>
       <button class="chip" id="refresh">↻ refresh</button>
     </div>
@@ -914,6 +1063,21 @@ let summaryCursor = 0;
 let autoTimer = null;
 let renderedTraceId = null;
 let detailPending = 0;
+
+// ── Branch (A/B variant) state ──────────────────────────────────────────
+const BRANCH_MODELS = [
+  { id: "qwen3.6-plus",      provider: "opencode-go", in: 3,   out: 15  },
+  { id: "deepseek-v4-flash", provider: "opencode-go", in: 0.4, out: 1.6 },
+];
+let branchOpen = false;
+let branchVariants = [];           // [{label, model, temp, topP, userMsg, branchKind, ctx:[{role,content,enabled,source}]}]
+let branchActiveIdx = 0;
+let branchCollapsedIds = new Set();
+let branchAddingMsg = false;
+let branchNewMsg = { role: "user", content: "" };
+let branchSubmitting = false;
+let branchSourceUuid = null;
+let loadedBranchTraces = new Set();
 
 const escapeHtml = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
 const fmtBytes = (n) => n < 1024 ? n + " B" : (n/1024).toFixed(1) + " KB";
@@ -1334,6 +1498,51 @@ async function deleteMemoryNote(m) {
   loadMemories();
 }
 
+async function deleteAllTraces() {
+  const ok = await confirmDialog({
+    title: "Delete ALL traces?",
+    message: "This permanently removes every trace and its events. Branch experiments are also cleared. This cannot be undone.",
+    target: `${document.getElementById("trace-count").textContent} traces`,
+    confirmLabel: "Delete all",
+  });
+  if (!ok) return;
+  let res;
+  try {
+    res = await fetch(`/traces`, { method: "DELETE" });
+  } catch {
+    alert("Delete failed: network error");
+    return;
+  }
+  if (!res.ok) { alert(`Delete failed: ${res.status}`); return; }
+  selectedTrace = null;
+  selectedNode = null;
+  renderEmpty();
+  loadTraces();
+}
+
+async function deleteAllMemories() {
+  const ok = await confirmDialog({
+    title: "Delete ALL memory notes?",
+    message: "This permanently removes every distilled memory across all projects. Filesystem memory files in ~/.claude are NOT affected. This cannot be undone.",
+    target: `${document.getElementById("memory-count").textContent} memories`,
+    confirmLabel: "Delete all",
+  });
+  if (!ok) return;
+  let res;
+  try {
+    res = await fetch(`/memory`, { method: "DELETE" });
+  } catch {
+    alert("Delete failed: network error");
+    return;
+  }
+  if (!res.ok) { alert(`Delete failed: ${res.status}`); return; }
+  projectMemoryCache.clear();
+  selectedMemoryId = null;
+  currentMemory = null;
+  renderEmpty();
+  loadMemories();
+}
+
 // ── Delete modal ───────────────────────────────────────────────────────
 
 function confirmDialog({ title, message, target, confirmLabel }) {
@@ -1414,6 +1623,21 @@ function eventLabel(e) {
 
 function eventStyle(e) {
   const role = e.role || e.kind || "";
+  if (e.isBranch) {
+    const status = e._branchStatus;
+    if (status === "running") {
+      return { fill: "var(--surface-2)", stroke: "var(--muted)", text: "var(--muted)" };
+    }
+    if (status === "error") {
+      return { fill: "var(--accent-red-soft)", stroke: "var(--accent-red)", text: "var(--ink)" };
+    }
+    // Sub-step kinds get distinct fills so they read as a tree of activity.
+    const kind = e._branchStepKind;
+    if (kind === "tool_use" || kind === "tool_result") {
+      return { fill: "var(--accent-amber-soft)", stroke: "var(--accent-amber)", text: "var(--ink)" };
+    }
+    return { fill: "var(--bg)", stroke: "var(--accent-green)", text: "var(--ink)" };
+  }
   if (e.toolUses && e.toolUses.length) {
     return { fill: "var(--accent-amber-soft)", stroke: "var(--accent-amber)", text: "var(--ink)" };
   }
@@ -1688,6 +1912,9 @@ function resetTraceState() {
   summaryCursor = 0;
   resetNormalizationState();
   selectedNode = null;
+  closeBranchPanel();
+  // Allow branches to re-load when returning to this trace.
+  loadedBranchTraces = new Set();
 }
 
 function selectNode(uuid) {
@@ -1866,6 +2093,592 @@ function compactEvents(events) {
   });
 }
 
+// ── Branch panel ────────────────────────────────────────────────────────
+
+function variantLabel(i) { return `variant ${String.fromCharCode(65 + i)}`; }
+function cloneCtx(ctx) { return ctx.map(c => ({ ...c })); }
+
+function eventRoleForCtx(ev) {
+  const r = ev.role || ev.kind || "";
+  if (r === "user") return "user";
+  if (r === "assistant") return "assistant";
+  if (r === "system") return "system";
+  if (r === "tool" || r === "tool_result") return "tool_result";
+  return "user";
+}
+
+function eventTextForCtx(ev) {
+  // Best-effort plaintext for the branch context. Prefer cached full text;
+  // fall back to preview. Strip <local-command-*> wrappers that just clutter
+  // the prompt without adding signal.
+  const full = fullEventCache.get(ev.uuid);
+  let text = "";
+  if (typeof full === "string") text = full;
+  else if (full?.text) text = full.text;
+  else if (full?.message?.content && typeof full.message.content === "string") text = full.message.content;
+  else if (Array.isArray(full?.message?.content)) {
+    text = full.message.content
+      .map(p => p?.text || p?.content || "")
+      .filter(Boolean)
+      .join("\n");
+  }
+  if (!text) text = ev.text || ev.textPreview || "";
+  return String(text || "").trim();
+}
+
+function buildContextFromAncestors(uuid) {
+  const path = [];
+  let cur = uuid;
+  while (cur) {
+    const ev = eventByUuid.get(cur);
+    if (!ev) break;
+    path.unshift(ev);
+    cur = ev.parentUuid;
+  }
+  // Drop the source node itself — we're regenerating its output.
+  const ancestors = path.slice(0, -1);
+  const ctx = [];
+  let hadSystem = false;
+  for (const ev of ancestors) {
+    const role = eventRoleForCtx(ev);
+    if (role === "system") {
+      if (hadSystem) continue;
+      hadSystem = true;
+    }
+    const content = eventTextForCtx(ev);
+    if (!content) continue;
+    ctx.push({ role, content, enabled: true, source: ev.uuid || "" });
+  }
+  if (!hadSystem) {
+    ctx.unshift({
+      role: "system",
+      content: "You are a helpful coding assistant. Continue the conversation naturally.",
+      enabled: true,
+      source: "system",
+    });
+  }
+  return ctx;
+}
+
+function findRecentUserMessage(uuid) {
+  let cur = uuid ? eventByUuid.get(uuid)?.parentUuid : null;
+  while (cur) {
+    const ev = eventByUuid.get(cur);
+    if (!ev) break;
+    if ((ev.role || "") === "user") {
+      const t = eventTextForCtx(ev);
+      if (t) return t;
+    }
+    cur = ev.parentUuid;
+  }
+  return "";
+}
+
+async function prefetchAncestorTexts(uuid) {
+  const need = [];
+  let cur = uuid;
+  while (cur) {
+    const ev = eventByUuid.get(cur);
+    if (!ev) break;
+    if (!fullEventCache.has(ev.uuid) && ev.textLength != null && ev.textLength > (ev.textPreview?.length || 0)) {
+      need.push(ev.uuid);
+    }
+    cur = ev.parentUuid;
+  }
+  await Promise.all(need.map(u => ensureFullEvent(u).catch(() => null)));
+}
+
+async function openBranchPanel() {
+  if (!selectedNode) return;
+  branchSourceUuid = selectedNode;
+  // Fetch full text for ancestors so the context isn't truncated.
+  await prefetchAncestorTexts(selectedNode);
+  const ctx = buildContextFromAncestors(selectedNode);
+  const userMsg = findRecentUserMessage(selectedNode);
+  branchVariants = [{
+    label: variantLabel(0),
+    model: BRANCH_MODELS[0].id,
+    temp: 0.3,
+    topP: 0.95,
+    userMsg,
+    branchKind: "experiment",
+    ctx,
+  }];
+  branchActiveIdx = 0;
+  branchCollapsedIds = new Set();
+  branchAddingMsg = false;
+  branchNewMsg = { role: "user", content: "" };
+  branchOpen = true;
+  mountBranchPanel();
+}
+
+function closeBranchPanel() {
+  branchOpen = false;
+  const main = $("main");
+  const panel = $("branch-panel");
+  if (panel) panel.remove();
+  if (main) main.classList.remove("with-branch");
+}
+
+function mountBranchPanel() {
+  const main = $("main");
+  if (!main) return;
+  let panel = $("branch-panel");
+  if (!panel) {
+    panel = document.createElement("section");
+    panel.className = "branch-panel";
+    panel.id = "branch-panel";
+    main.appendChild(panel);
+  }
+  main.classList.add("with-branch");
+  renderBranchPanel();
+}
+
+function activeVariant() { return branchVariants[branchActiveIdx]; }
+
+function patchActiveVariant(patch) {
+  branchVariants = branchVariants.map((v, i) => (i === branchActiveIdx ? { ...v, ...patch } : v));
+  renderBranchPanel();
+}
+
+function setVariantCtx(fn) {
+  branchVariants = branchVariants.map((v, i) =>
+    i === branchActiveIdx ? { ...v, ctx: fn(v.ctx) } : v
+  );
+  renderBranchPanel();
+}
+
+function branchAddVariant() {
+  if (branchVariants.length >= 6) return;
+  const v = activeVariant();
+  const i = branchVariants.length;
+  branchVariants = [
+    ...branchVariants,
+    { ...v, ctx: cloneCtx(v.ctx), label: variantLabel(i) },
+  ];
+  branchActiveIdx = i;
+  branchCollapsedIds = new Set();
+  renderBranchPanel();
+}
+
+function branchRemoveVariant(i) {
+  if (branchVariants.length <= 1) return;
+  branchVariants = branchVariants.filter((_, j) => j !== i);
+  branchActiveIdx = Math.max(0, Math.min(branchActiveIdx, branchVariants.length - 1));
+  renderBranchPanel();
+}
+
+function variantToSpec(v) {
+  return {
+    label: v.label,
+    branchKind: v.branchKind,
+    model: v.model,
+    provider: (BRANCH_MODELS.find(m => m.id === v.model) || {}).provider || "opencode-go",
+    temperature: v.temp,
+    topP: v.topP,
+    userMessage: v.userMsg,
+    context: v.ctx,
+  };
+}
+
+function estimateVariantCost(v) {
+  const m = BRANCH_MODELS.find(x => x.id === v.model) || { in: 1, out: 4 };
+  const inTok = v.ctx.filter(c => c.enabled !== false).reduce((a, c) => a + (c.content?.length || 0) / 4, 0)
+              + (v.userMsg?.length || 0) / 4;
+  const outTok = 600;
+  return (inTok * m.in + outTok * m.out) / 1_000_000;
+}
+
+function renderBranchPanel() {
+  const panel = $("branch-panel");
+  if (!panel) return;
+  if (!branchVariants.length) { closeBranchPanel(); return; }
+  const v = activeVariant();
+  const m = BRANCH_MODELS.find(x => x.id === v.model) || { in: 3, out: 15 };
+  const enabledCtx = v.ctx.filter(c => c.enabled !== false);
+  const estInTok = enabledCtx.reduce((a, c) => a + c.content.length / 4, 0) + v.userMsg.length / 4;
+  const estOutTok = 600;
+  const estCostThis = (estInTok * m.in + estOutTok * m.out) / 1_000_000;
+  const totalCost = branchVariants.reduce((s, vv) => s + estimateVariantCost(vv), 0);
+
+  panel.innerHTML = `
+    <div class="panel-header">
+      <div class="panel-title">
+        <span class="dot dot-running"></span>
+        <span>Branch from <span style="font-family:var(--font-mono)">${escapeHtml((branchSourceUuid || "").slice(0, 8))}</span></span>
+        <span class="muted" style="margin-left:8px">${branchVariants.length} variant${branchVariants.length > 1 ? "s" : ""}</span>
+      </div>
+      <div class="panel-actions">
+        <button class="icon-btn" id="branch-close" title="close">✕</button>
+      </div>
+    </div>
+    <div class="variant-tabs">
+      ${branchVariants.map((vv, i) => `
+        <button class="variant-tab ${i === branchActiveIdx ? "is-active" : ""}" data-idx="${i}" title="${escapeHtml(vv.model)} · ${escapeHtml(vv.label)}">
+          <span class="variant-tab-letter">${String.fromCharCode(65 + i)}</span>
+          <span class="variant-tab-model">${escapeHtml(vv.model)}</span>
+          ${branchVariants.length > 1 ? `<span class="variant-tab-x" data-rm="${i}">×</span>` : ""}
+        </button>
+      `).join("")}
+      ${branchVariants.length < 6 ? `<button class="variant-tab variant-tab-add" id="branch-add">+ add variant</button>` : ""}
+    </div>
+    <div class="branch-body">
+      <section class="branch-section">
+        <div class="section-label">Model</div>
+        <div class="model-grid">
+          ${BRANCH_MODELS.map(mm => `
+            <button class="model-card ${v.model === mm.id ? "is-selected" : ""}" data-model="${escapeHtml(mm.id)}">
+              <div class="model-name">${escapeHtml(mm.id)}</div>
+              <div class="model-meta"><span>${escapeHtml(mm.provider)}</span><span>·</span><span>$${mm.in}/${mm.out}</span></div>
+            </button>
+          `).join("")}
+        </div>
+      </section>
+
+      <section class="branch-section">
+        <div class="row-2">
+          <div>
+            <div class="section-label">Temperature <span class="muted" style="font-family:var(--font-mono)">${v.temp.toFixed(2)}</span></div>
+            <input type="range" min="0" max="1" step="0.05" value="${v.temp}" id="branch-temp" class="slider"/>
+          </div>
+          <div>
+            <div class="section-label">Top-p <span class="muted" style="font-family:var(--font-mono)">${v.topP.toFixed(2)}</span></div>
+            <input type="range" min="0" max="1" step="0.05" value="${v.topP}" id="branch-topp" class="slider"/>
+          </div>
+        </div>
+      </section>
+
+      <section class="branch-section">
+        <div class="section-head">
+          <div class="section-label">Context · ${enabledCtx.length}/${v.ctx.length} enabled</div>
+          <div style="display:flex; gap:4px">
+            <button class="chip-mini" id="branch-collapse-all">collapse all</button>
+            <button class="chip-mini" id="branch-expand-all">expand all</button>
+            <button class="chip-mini" id="branch-msg-add">+ add</button>
+          </div>
+        </div>
+        <div class="ctx-hint">per-variant · edits to other variants don't affect this one</div>
+        <div class="msg-list">
+          ${v.ctx.map((m, i) => {
+            const collapsed = branchCollapsedIds.has(i);
+            const tok = Math.round((m.content?.length || 0) / 4);
+            const enabled = m.enabled !== false;
+            const roleSlug = m.role.replace("_", "");
+            const rows = Math.min(10, Math.max(2, (m.content || "").split("\n").length + 1));
+            return `
+              <div class="msg ${enabled ? "" : "msg-off"}" data-msg-idx="${i}">
+                <div class="msg-head">
+                  <input type="checkbox" data-msg-toggle="${i}" ${enabled ? "checked" : ""}/>
+                  <span class="role-tag role-${escapeHtml(roleSlug)}">${escapeHtml(m.role)}</span>
+                  ${m.source && m.source !== "system" ? `<span class="muted" style="font-family:var(--font-mono);font-size:10px">from ${escapeHtml(String(m.source).slice(0, 8))}</span>` : ""}
+                  <span class="muted" style="font-family:var(--font-mono);font-size:10px">~${tok}t</span>
+                  <div style="flex:1"></div>
+                  <button class="icon-btn-sm" data-msg-collapse="${i}" title="${collapsed ? "expand" : "collapse"}">${collapsed ? "▸" : "▾"}</button>
+                  <button class="icon-btn-sm" data-msg-rm="${i}">✕</button>
+                </div>
+                ${collapsed
+                  ? `<div class="msg-preview">${escapeHtml((m.content || "").slice(0, 80))}${(m.content || "").length > 80 ? "…" : ""}</div>`
+                  : `<textarea class="msg-body" rows="${rows}" data-msg-edit="${i}">${escapeHtml(m.content || "")}</textarea>`
+                }
+              </div>
+            `;
+          }).join("")}
+          ${branchAddingMsg ? `
+            <div class="msg" style="border-color: var(--accent-amber)">
+              <div class="msg-head">
+                <select id="branch-newmsg-role">
+                  ${["system","user","assistant","tool_result"].map(r => `<option value="${r}" ${branchNewMsg.role===r?"selected":""}>${r}</option>`).join("")}
+                </select>
+                <div style="flex:1"></div>
+                <button class="chip-mini" id="branch-newmsg-add">add</button>
+                <button class="icon-btn-sm" id="branch-newmsg-cancel">✕</button>
+              </div>
+              <textarea class="msg-body" rows="3" placeholder="message content…" id="branch-newmsg-content">${escapeHtml(branchNewMsg.content)}</textarea>
+            </div>
+          ` : ""}
+        </div>
+      </section>
+
+      <section class="branch-section">
+        <div class="section-label">User message / task</div>
+        <textarea class="msg-body user-msg" id="branch-usermsg" rows="4">${escapeHtml(v.userMsg || "")}</textarea>
+      </section>
+
+      <section class="branch-section estimate">
+        <div class="estimate-row">
+          <div class="kv"><div class="kv-k">this variant</div><div class="kv-v mono">$${estCostThis.toFixed(4)}</div></div>
+          <div class="kv"><div class="kv-k">total est.</div><div class="kv-v mono">$${totalCost.toFixed(4)}</div></div>
+          <div class="kv"><div class="kv-k">variants</div><div class="kv-v mono">${branchVariants.length}</div></div>
+          <div class="kv"><div class="kv-k">eta</div><div class="kv-v mono">~${(estOutTok / 40).toFixed(1)}s/each</div></div>
+        </div>
+      </section>
+    </div>
+
+    <div class="branch-footer">
+      <button class="btn btn-ghost" id="branch-cancel" ${branchSubmitting ? "disabled" : ""}>cancel</button>
+      <button class="btn btn-ghost" id="branch-save" ${branchSubmitting ? "disabled" : ""}>save as template</button>
+      <button class="btn btn-primary" id="branch-submit" ${branchSubmitting ? "disabled" : ""}>
+        ${branchSubmitting ? `running ${branchVariants.length}…` : `↳ run ${branchVariants.length} branch${branchVariants.length > 1 ? "es" : ""}`}
+      </button>
+    </div>
+  `;
+
+  // Wire handlers
+  panel.querySelector("#branch-close")?.addEventListener("click", closeBranchPanel);
+  panel.querySelector("#branch-cancel")?.addEventListener("click", closeBranchPanel);
+  panel.querySelector("#branch-add")?.addEventListener("click", branchAddVariant);
+  panel.querySelectorAll(".variant-tab[data-idx]").forEach(btn => {
+    btn.addEventListener("click", (e) => {
+      if (e.target.closest("[data-rm]")) return;
+      branchActiveIdx = Number(btn.dataset.idx);
+      branchCollapsedIds = new Set();
+      renderBranchPanel();
+    });
+  });
+  panel.querySelectorAll("[data-rm]").forEach(x => {
+    x.addEventListener("click", (e) => {
+      e.stopPropagation();
+      branchRemoveVariant(Number(x.dataset.rm));
+    });
+  });
+  panel.querySelectorAll(".model-card[data-model]").forEach(c => {
+    c.addEventListener("click", () => patchActiveVariant({ model: c.dataset.model }));
+  });
+  panel.querySelector("#branch-temp")?.addEventListener("input", (e) => {
+    branchVariants[branchActiveIdx].temp = +e.target.value;
+    // Update label only — avoid full re-render so the slider keeps focus.
+    const lbl = panel.querySelector("#branch-temp")?.previousElementSibling?.querySelector(".muted");
+    if (lbl) lbl.textContent = (+e.target.value).toFixed(2);
+  });
+  panel.querySelector("#branch-temp")?.addEventListener("change", () => renderBranchPanel());
+  panel.querySelector("#branch-topp")?.addEventListener("input", (e) => {
+    branchVariants[branchActiveIdx].topP = +e.target.value;
+    const lbl = panel.querySelector("#branch-topp")?.previousElementSibling?.querySelector(".muted");
+    if (lbl) lbl.textContent = (+e.target.value).toFixed(2);
+  });
+  panel.querySelector("#branch-topp")?.addEventListener("change", () => renderBranchPanel());
+  panel.querySelector("#branch-collapse-all")?.addEventListener("click", () => {
+    branchCollapsedIds = new Set(activeVariant().ctx.map((_, i) => i));
+    renderBranchPanel();
+  });
+  panel.querySelector("#branch-expand-all")?.addEventListener("click", () => {
+    branchCollapsedIds = new Set();
+    renderBranchPanel();
+  });
+  panel.querySelector("#branch-msg-add")?.addEventListener("click", () => {
+    branchAddingMsg = true;
+    renderBranchPanel();
+  });
+  panel.querySelector("#branch-newmsg-cancel")?.addEventListener("click", () => {
+    branchAddingMsg = false;
+    branchNewMsg = { role: "user", content: "" };
+    renderBranchPanel();
+  });
+  panel.querySelector("#branch-newmsg-role")?.addEventListener("change", (e) => {
+    branchNewMsg.role = e.target.value;
+  });
+  panel.querySelector("#branch-newmsg-content")?.addEventListener("input", (e) => {
+    branchNewMsg.content = e.target.value;
+  });
+  panel.querySelector("#branch-newmsg-add")?.addEventListener("click", () => {
+    if (!branchNewMsg.content.trim()) return;
+    setVariantCtx(arr => [...arr, { ...branchNewMsg, enabled: true, source: "" }]);
+    branchAddingMsg = false;
+    branchNewMsg = { role: "user", content: "" };
+    renderBranchPanel();
+  });
+  panel.querySelectorAll("[data-msg-toggle]").forEach(cb => {
+    cb.addEventListener("change", () => {
+      const i = Number(cb.dataset.msgToggle);
+      setVariantCtx(arr => arr.map((m, j) => j === i ? { ...m, enabled: !(m.enabled !== false) } : m));
+    });
+  });
+  panel.querySelectorAll("[data-msg-collapse]").forEach(b => {
+    b.addEventListener("click", () => {
+      const i = Number(b.dataset.msgCollapse);
+      const next = new Set(branchCollapsedIds);
+      next.has(i) ? next.delete(i) : next.add(i);
+      branchCollapsedIds = next;
+      renderBranchPanel();
+    });
+  });
+  panel.querySelectorAll("[data-msg-rm]").forEach(b => {
+    b.addEventListener("click", () => {
+      const i = Number(b.dataset.msgRm);
+      setVariantCtx(arr => arr.filter((_, j) => j !== i));
+    });
+  });
+  panel.querySelectorAll("[data-msg-edit]").forEach(t => {
+    t.addEventListener("input", (e) => {
+      const i = Number(t.dataset.msgEdit);
+      // Don't full-re-render on every keystroke (focus loss). Mutate in place.
+      branchVariants[branchActiveIdx].ctx = branchVariants[branchActiveIdx].ctx.map((m, j) =>
+        j === i ? { ...m, content: e.target.value } : m
+      );
+    });
+  });
+  panel.querySelector("#branch-usermsg")?.addEventListener("input", (e) => {
+    branchVariants[branchActiveIdx].userMsg = e.target.value;
+  });
+  panel.querySelector("#branch-submit")?.addEventListener("click", submitBranchRun);
+  panel.querySelector("#branch-save")?.addEventListener("click", saveBranchTemplate);
+}
+
+// Streams ndjson from /branch/run/stream. Each line is a {type,...} record:
+//   root           — variant root node appears (status='running')
+//   step           — child node under the variant root (assistant / tool_use / tool_result)
+//   variant_done   — root upserts to its final 'ok'/'error' state
+//   done           — server is closing the response
+async function submitBranchRun() {
+  if (branchSubmitting) return;
+  if (!branchSourceUuid || !selectedTrace) return;
+  branchSubmitting = true;
+  renderBranchPanel();
+  try {
+    const sourceEv = eventByUuid.get(branchSourceUuid);
+    const parentUuid = sourceEv?.parentUuid || "";
+    const r = await fetch("/branch/run/stream", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        sourceNodeId: branchSourceUuid,
+        traceId: selectedTrace,
+        parentNodeId: parentUuid,
+        variants: branchVariants.map(variantToSpec),
+      }),
+    });
+    if (!r.ok) {
+      const detail = await r.text().catch(() => "");
+      alert(`branch run failed: ${r.status} ${detail.slice(0, 300)}`);
+      return;
+    }
+    // Close the panel right away so the user watches the tree grow live.
+    closeBranchPanel();
+
+    const reader = r.body.getReader();
+    const dec = new TextDecoder();
+    let buf = "";
+    let firstRootSelected = false;
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      let nl;
+      while ((nl = buf.indexOf("\n")) >= 0) {
+        const line = buf.slice(0, nl);
+        buf = buf.slice(nl + 1);
+        if (!line.trim()) continue;
+        let msg;
+        try { msg = JSON.parse(line); } catch { continue; }
+        if (msg.type === "root") {
+          appendBranchResults([msg.node]);
+          if (!firstRootSelected) {
+            selectedNode = msg.node.id;
+            firstRootSelected = true;
+            renderDetail();
+          }
+        } else if (msg.type === "step") {
+          appendBranchResults([msg.node]);
+        } else if (msg.type === "variant_done") {
+          // Replace the running root with its final shape (status + output + tokens).
+          appendBranchResults([msg.rootNode]);
+        }
+      }
+    }
+  } catch (e) {
+    alert("branch run error: " + e.message);
+  } finally {
+    branchSubmitting = false;
+    if (branchOpen) renderBranchPanel();
+  }
+}
+
+async function saveBranchTemplate() {
+  const name = prompt("Template name", `branch-${branchVariants.length}var`);
+  if (!name) return;
+  try {
+    const r = await fetch("/experiments", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name, specs: branchVariants.map(variantToSpec) }),
+    });
+    if (!r.ok) throw new Error(await r.text());
+    alert("template saved");
+  } catch (e) {
+    alert("save failed: " + e.message);
+  }
+}
+
+// Convert a /branch/run result Node into a transcript.line shape so the tree
+// picks it up automatically as a sibling of the source node. v2 nodes can be
+// either the variant root (kind=llm), an assistant step, a tool_use step, or
+// a tool_result step — the role/kind chips reflect _stepKind when present.
+function branchNodeToTranscriptEvent(node) {
+  const text = node.output || "";
+  const stepKind = node._stepKind || (node.kind === "tool" ? "tool_use" : "assistant");
+  const role = stepKind === "tool_use" || stepKind === "tool_result" ? "tool" : "assistant";
+  // Surface tool input/output in the same shape the dashboard already renders
+  // for real tool nodes, so the existing toolUses / _toolOutput paths work.
+  const toolUses = (node.toolCalls || []).map((t) => ({ name: t.name, input: t.input }));
+  return {
+    type: "transcript.line",
+    uuid: node.id,
+    parentUuid: node.parent || "",
+    role,
+    text,
+    textPreview: text.slice(0, 240),
+    textLength: text.length,
+    model: node.model,
+    duration: node.latency || 0,
+    at: node.timestamp || new Date().toISOString(),
+    usage: { input_tokens: node.inputTokens || 0, output_tokens: node.outputTokens || 0 },
+    toolUses: toolUses.length ? toolUses : undefined,
+    _toolOutput: stepKind === "tool_result" ? text : undefined,
+    isBranch: true,
+    branchLabel: node.branchLabel || node.label || "branch",
+    branchKind: node.branchKind || "experiment",
+    _branchStatus: node.status || "ok",
+    _branchStepKind: stepKind,
+    // _raw must carry .text so renderTab("content") finds the full body via
+    // full?.text instead of falling through to the 240-char preview.
+    _raw: { ...node, text },
+  };
+}
+
+// Idempotent upsert — same uuid means same node, just replace the cached
+// shape (used when a "running" root is later updated to "ok"/"error").
+function appendBranchResults(nodes) {
+  for (const n of nodes || []) {
+    const ev = branchNodeToTranscriptEvent(n);
+    if (eventByUuid.has(ev.uuid)) {
+      // Replace in-place: update currentEvents entry, eventByUuid, full cache.
+      const idx = currentEvents.findIndex((e) => e.uuid === ev.uuid);
+      if (idx >= 0) currentEvents[idx] = ev;
+      eventByUuid.set(ev.uuid, ev);
+      fullEventCache.set(ev.uuid, ev._raw);
+    } else {
+      currentEvents.push(ev);
+      eventByUuid.set(ev.uuid, ev);
+      fullEventCache.set(ev.uuid, ev._raw);
+    }
+  }
+  renderTrace();
+}
+
+async function loadPersistedBranches(traceId) {
+  if (!traceId) return;
+  if (loadedBranchTraces.has(traceId)) return;
+  loadedBranchTraces.add(traceId);
+  try {
+    const r = await fetch(`/branch/nodes?traceId=${encodeURIComponent(traceId)}`);
+    if (!r.ok) return;
+    const { nodes } = await r.json();
+    if (traceId !== selectedTrace) return;
+    if (!nodes?.length) return;
+    appendBranchResults(nodes);
+  } catch {}
+}
+
 function renderTrace() {
   const main = $("main");
   const started = currentEvents.find(e => e.type === "trace.started");
@@ -1983,6 +2796,10 @@ function renderDetail() {
         </span>
       </div>
       <div class="panel-actions">
+        <button class="chip" id="branch-btn" title="open branch / A-B panel">+ branch</button>
+        ${ev.isBranch && ev._branchStepKind ? `<span class="chip" title="branch step kind">${escapeHtml(ev._branchStepKind)}</span>` : ""}
+        ${ev.isBranch && ev._branchStatus === "running" ? `<span class="chip" style="color:var(--muted)"><span class="dot dot-running"></span> running</span>` : ""}
+        ${ev.isBranch && ev._branchStatus === "error" ? `<span class="chip" style="color:var(--accent-red)">error</span>` : ""}
         <span class="role-tag role-${escapeHtml(isToolGroup ? "tool" : role)}">${escapeHtml(isToolGroup ? `group · ${ev._toolGroup.length}` : role)}</span>
       </div>
     </div>
@@ -2020,6 +2837,10 @@ function renderDetail() {
       body.innerHTML = renderTab(tab, ev);
       hydrateTab(tab, ev);
     });
+  });
+  panel.querySelector("#branch-btn")?.addEventListener("click", () => {
+    if (branchOpen) closeBranchPanel();
+    else openBranchPanel();
   });
 }
 
@@ -2318,6 +3139,7 @@ async function loadDetail() {
 
   if (sameTrace && added === 0) return;
   renderTrace();
+  loadPersistedBranches(selectedTrace);
 }
 
 async function ensureFullEvent(uuid) {
@@ -2336,6 +3158,8 @@ async function ensureFullEvent(uuid) {
 
 $("refresh").addEventListener("click", () => { loadTraces(); loadMemories(); loadCgRepos(); if (selectedTrace) loadDetail(); });
 $("auto").addEventListener("change", (e) => { if (e.target.checked) startAuto(); else stopAuto(); });
+$("clear-traces").addEventListener("click", deleteAllTraces);
+$("clear-memory").addEventListener("click", deleteAllMemories);
 
 document.addEventListener("click", (e) => {
   if (e.target.closest("#compact-chip")) {

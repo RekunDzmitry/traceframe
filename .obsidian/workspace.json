@@ -178,6 +178,7 @@
   },
   "active": "2a1433ce09ff44c5",
   "lastOpenFiles": [
+    "errors.log",
     "ingest/codegraph/embedder.mjs",
     "ingest/package-lock.json",
     "ingest/node_modules/tree-sitter-typescript/tree-sitter-typescript.wasm",
@@ -189,7 +190,6 @@
     "ingest/node_modules/tree-sitter-typescript/README.md",
     "ingest/node_modules/tree-sitter-typescript/prebuilds/win32-x64/tree-sitter-typescript.node",
     "ingest/node_modules/tree-sitter-typescript/prebuilds/win32-arm64/tree-sitter-typescript.node",
-    "ingest/node_modules/tree-sitter-typescript/prebuilds/linux-x64/tree-sitter-typescript.node",
     "ingest/node_modules/tree-sitter/vendor/tree-sitter/README.md",
     "ingest/node_modules/tree-sitter/vendor/tree-sitter/lib/src/unicode/README.md",
     "ingest/node_modules/tree-sitter/vendor/tree-sitter/lib/README.md",

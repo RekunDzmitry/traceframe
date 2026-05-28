@@ -510,6 +510,40 @@ mark.mark-green { background: var(--accent-green-soft); color: #0f5132; padding:
 .ctx-hint { font-size: 10px; margin-bottom: 6px; }
 .msg-head .role-tag { flex-shrink: 0; }
 
+.variant-tabs {
+  display: flex; gap: 4px; flex-wrap: wrap;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+.variant-tab {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 4px 8px;
+  background: var(--bg); border: 1px solid var(--border);
+  border-radius: 3px; cursor: pointer;
+  font-family: var(--font-mono); font-size: 11px;
+  color: var(--muted);
+}
+.variant-tab:hover { border-color: var(--border-strong); color: var(--ink); }
+.variant-tab.is-active {
+  background: var(--surface-2); border-color: var(--ink); color: var(--ink);
+}
+.variant-tab-letter {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 16px; height: 16px; border-radius: 50%;
+  background: var(--ink); color: var(--bg);
+  font-size: 9.5px; font-weight: 600;
+}
+.variant-tab.is-active .variant-tab-letter { background: var(--accent-green); }
+.variant-tab-model { font-size: 10.5px; }
+.variant-tab-x {
+  margin-left: 2px; color: var(--muted); font-size: 13px; line-height: 1;
+  padding: 0 2px;
+}
+.variant-tab-x:hover { color: var(--ink); }
+.variant-tab-add { color: var(--muted); border-style: dashed; }
+.variant-tab-add:hover { color: var(--ink); border-color: var(--border-strong); }
+
 /* ───────── Tweaks panel ───────── */
 .tweaks {
   position: fixed; bottom: 12px; right: 12px;

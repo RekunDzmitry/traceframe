@@ -11,9 +11,10 @@ import { createServer } from "node:http";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { spawn } from "node:child_process";
 import pg from "pg";
 import { indexRepo } from "./codegraph/indexer.mjs";
-import { embedQuery, vectorLiteral } from "./codegraph/embedder.mjs";
+import { embedBatch, embedQuery, vectorLiteral } from "./codegraph/embedder.mjs";
 
 const { Pool } = pg;
 
@@ -164,6 +165,13 @@ const handleDeleteTrace = async (_req, res, traceId) => {
   const { rowCount } = await pool.query(`DELETE FROM traces WHERE trace_id = $1`, [traceId]);
   if (rowCount === 0) return json(res, 404, { error: "not found" });
   return json(res, 200, { deleted: traceId });
+};
+
+const handleDeleteAllTraces = async (req, res) => {
+  if (!authedOrLocal(req)) return json(res, 401, { error: "unauthorized" });
+  const { rowCount } = await pool.query(`DELETE FROM traces`);
+  await pool.query(`DELETE FROM branch_nodes`);
+  return json(res, 200, { deleted: rowCount });
 };
 
 const handleGetTrace = async (_req, res, traceId) => {
@@ -337,6 +345,44 @@ const ensureSchema = async () => {
     } catch (e) {
       console.warn("pgvector setup skipped:", e.message);
     }
+    // A/B branch experiments
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS branch_nodes (
+        id             BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+        node_id        TEXT        NOT NULL,
+        trace_id       TEXT        NOT NULL,
+        source_node_id TEXT        NOT NULL,
+        parent_node_id TEXT        NOT NULL,
+        branch_kind    TEXT        NOT NULL DEFAULT 'experiment',
+        branch_label   TEXT,
+        model          TEXT        NOT NULL,
+        provider       TEXT        NOT NULL DEFAULT 'opencode-go',
+        spec           JSONB       NOT NULL,
+        result         JSONB       NOT NULL,
+        status         TEXT        NOT NULL,
+        error          TEXT,
+        created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        UNIQUE (trace_id, node_id)
+      )
+    `);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_branch_nodes_trace  ON branch_nodes(trace_id)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_branch_nodes_parent ON branch_nodes(trace_id, parent_node_id)`);
+    // v2: agent sub-tree columns. status='running' is now valid for the root row.
+    await pool.query(`ALTER TABLE branch_nodes ADD COLUMN IF NOT EXISTS root_branch_node_id TEXT`);
+    await pool.query(`ALTER TABLE branch_nodes ADD COLUMN IF NOT EXISTS step_index INT NOT NULL DEFAULT 0`);
+    await pool.query(`ALTER TABLE branch_nodes ADD COLUMN IF NOT EXISTS step_kind TEXT NOT NULL DEFAULT 'assistant'`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_branch_nodes_root ON branch_nodes(trace_id, root_branch_node_id)`);
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS branch_experiments (
+        id          TEXT        PRIMARY KEY,
+        name        TEXT        NOT NULL,
+        notes       TEXT,
+        specs       JSONB       NOT NULL,
+        created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_branch_experiments_recent ON branch_experiments(created_at DESC)`);
   } catch (e) {
     console.warn("ensureSchema failed:", e.message);
   }
@@ -573,18 +619,38 @@ const parseSummary = (summary) => {
   };
 };
 
+const embedMemory = async (id, summary) => {
+  try {
+    const vec = await embedQuery(summary);
+    const literal = vectorLiteral(vec);
+    await pool.query(
+      `UPDATE memories SET embedding = $1::vector WHERE id = $2`,
+      [literal, id]
+    );
+  } catch (e) {
+    // Embedding failures are non-fatal — the row is stored, just not
+    // searchable via vector search until a backfill runs.
+    console.warn(`embed memory ${id} failed:`, e.message);
+  }
+};
+
 const distillSession = async (traceId, repoTag, sessionId) => {
   try {
     const { summary, meta } = await produceSummary(traceId);
     if (meta.quality_warning) {
       console.warn(`distill ${sessionId}: summary appears to be a transcript dump`);
     }
-    await pool.query(
+    const { rows } = await pool.query(
       `INSERT INTO memories (repo_tag, session_id, trace_id, summary, meta)
-       VALUES ($1, $2, $3, $4, $5)`,
+       VALUES ($1, $2, $3, $4, $5)
+       RETURNING id`,
       [repoTag, sessionId, traceId, summary, meta]
     );
-    console.log(`distill ${sessionId}: stored ${summary.length} chars for ${repoTag}`);
+    const id = rows[0].id;
+    console.log(`distill ${sessionId}: stored ${summary.length} chars (id=${id}) for ${repoTag}`);
+
+    // Embed async — don't block the response.
+    setImmediate(() => embedMemory(id, summary));
   } catch (e) {
     console.error(`distill ${sessionId} failed:`, e.message);
   }
@@ -793,6 +859,89 @@ const handleDeleteMemory = async (req, res, idStr) => {
   return json(res, 200, { deleted: id });
 };
 
+const handleDeleteAllMemories = async (req, res) => {
+  if (!authedOrLocal(req)) return json(res, 401, { error: "unauthorized" });
+  const { rowCount } = await pool.query(`DELETE FROM memories`);
+  return json(res, 200, { deleted: rowCount });
+};
+
+// ─── Embedding endpoint (called by memory service) ─────────────────────
+
+const handlePostEmbed = async (req, res) => {
+  if (!authedOrLocal(req)) return json(res, 401, { error: "unauthorized" });
+  let body;
+  try {
+    body = JSON.parse(await readBody(req, 32 * 1024));
+  } catch (e) {
+    return json(res, 400, { error: "invalid json", detail: String(e.message) });
+  }
+  if (!body.text || typeof body.text !== "string" || !body.text.trim()) {
+    return json(res, 400, { error: "text required" });
+  }
+  const t0 = Date.now();
+  try {
+    const vec = await embedQuery(body.text.trim());
+    return json(res, 200, {
+      embedding: vec,
+      dims: vec.length,
+      took_ms: Date.now() - t0,
+    });
+  } catch (e) {
+    return json(res, 503, { error: "embedder unavailable", detail: String(e.message) });
+  }
+};
+
+// ─── Backfill endpoint: embed all un-embedded memories ─────────────────
+
+const handlePostBackfillMemories = async (req, res) => {
+  if (!authedOrLocal(req)) return json(res, 401, { error: "unauthorized" });
+
+  const { rows } = await pool.query(
+    `SELECT id, summary FROM memories WHERE embedding IS NULL`
+  );
+
+  if (!rows.length) {
+    return json(res, 200, { message: "no unembedded memories", total: 0 });
+  }
+
+  const texts = rows.map(r => r.summary);
+  const t0 = Date.now();
+
+  try {
+    const vecs = await embedBatch(texts);
+    const literals = vecs.map(vectorLiteral);
+
+    // Update in batches of 32 to avoid huge UPDATE statements.
+    let done = 0;
+    const BATCH = 32;
+    for (let i = 0; i < rows.length; i += BATCH) {
+      const slice = rows.slice(i, i + BATCH);
+      const ids = slice.map(r => r.id);
+      const litSlice = literals.slice(i, i + BATCH);
+
+      // Build a VALUES clause: (id, literal) pairs
+      const vals = slice.map((_, j) => `($${j * 2 + 1}::bigint, $${j * 2 + 2}::vector)`).join(", ");
+      const params = slice.flatMap((r, j) => [r.id, litSlice[j]]);
+
+      await pool.query(
+        `UPDATE memories m
+            SET embedding = v.vec
+           FROM (VALUES ${vals}) AS v(id, vec)
+          WHERE m.id = v.id`,
+        params
+      );
+      done += slice.length;
+    }
+
+    const ms = Date.now() - t0;
+    console.log(`backfill-memories: embedded ${done} memories in ${ms}ms`);
+    return json(res, 200, { message: `embedded ${done} memories`, total: done, took_ms: ms });
+  } catch (e) {
+    console.error("backfill-memories failed:", e.message);
+    return json(res, 500, { error: "backfill failed", detail: String(e.message) });
+  }
+};
+
 const handlePatchMemory = async (req, res, idStr) => {
   if (!authedOrLocal(req)) return json(res, 401, { error: "unauthorized" });
   const id = Number(idStr);
@@ -813,6 +962,10 @@ const handlePatchMemory = async (req, res, idStr) => {
   );
   if (!rowCount) return json(res, 404, { error: "not_found" });
   const r = rows[0];
+
+  // Re-embed after manual edit.
+  setImmediate(() => embedMemory(Number(r.id), r.summary));
+
   return json(res, 200, {
     memory: {
       id: Number(r.id),
@@ -850,6 +1003,10 @@ const handlePostMemoryRedistill = async (req, res, idStr) => {
     [summary, meta, id]
   );
   const r = updRows[0];
+
+  // Re-embed after redistill.
+  setImmediate(() => embedMemory(Number(r.id), r.summary));
+
   return json(res, 200, {
     memory: {
       id: Number(r.id),
@@ -1354,8 +1511,685 @@ const handleGetCodegraphFileMemories = async (req, res) => {
   });
 };
 
+// ─── A/B branch experiments ───────────────────────────────────────────────
+// Run one or more variants of a node against an LLM (via OpenCode), persist
+// each as a Node-shaped row, return them so the UI can append as siblings.
+const ALLOWED_BRANCH_KINDS = new Set(["alt-model", "experiment"]);
+const ALLOWED_ROLES = new Set(["system", "user", "assistant", "tool_result"]);
+
+const randHex = (n = 4) =>
+  Array.from({ length: n }, () =>
+    Math.floor(Math.random() * 256).toString(16).padStart(2, "0")
+  ).join("");
+
+const flattenMessagesForInput = (messages) =>
+  messages.map((m) => `<${m.role}>${m.content}</${m.role}>`).join("\n");
+
+const runVariant = async ({ variant }) => {
+  if (!OPENCODE_KEY) throw new Error("OPENCODE_GO_API_KEY not set");
+
+  const ctx = (variant.context || []).filter(
+    (c) =>
+      c &&
+      ALLOWED_ROLES.has(c.role) &&
+      c.enabled !== false &&
+      typeof c.content === "string"
+  );
+  const messages = ctx.map((c) => ({
+    role: c.role === "tool_result" ? "user" : c.role,
+    content: c.role === "tool_result" ? `[tool_result] ${c.content}` : c.content,
+  }));
+  if (variant.userMessage && variant.userMessage.trim()) {
+    messages.push({ role: "user", content: variant.userMessage });
+  }
+
+  const model = variant.model || OPENCODE_MODEL;
+  const t0 = Date.now();
+  const body = {
+    model,
+    messages,
+    temperature: typeof variant.temperature === "number" ? variant.temperature : 0.3,
+    top_p: typeof variant.topP === "number" ? variant.topP : 0.95,
+  };
+  if (variant.maxOutputTokens) body.max_tokens = variant.maxOutputTokens;
+
+  const r = await fetch(`${OPENCODE_BASE}/chat/completions`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      authorization: `Bearer ${OPENCODE_KEY}`,
+    },
+    body: JSON.stringify(body),
+  });
+  const latency = Date.now() - t0;
+  if (!r.ok) {
+    const detail = await r.text().catch(() => "");
+    throw new Error(`opencode ${r.status}: ${detail.slice(0, 300)}`);
+  }
+  const data = await r.json();
+  const output = data?.choices?.[0]?.message?.content;
+  if (typeof output !== "string") throw new Error("opencode returned no content");
+  const usage = data.usage || {};
+  return {
+    output,
+    inputTokens: Number(usage.prompt_tokens) || 0,
+    outputTokens: Number(usage.completion_tokens) || 0,
+    latency,
+    sentMessages: messages,
+  };
+};
+
+// ─── pi-agent runner ──────────────────────────────────────────────────────
+// runVariantPi spawns the pi CLI in --mode json, parses its JSONL session
+// stream, and emits one Node per assistant message / tool_use / tool_result
+// via onStep(). Each emitted node has _stepIndex / _stepKind / parent set so
+// the caller can persist + forward as ndjson.
+//
+// Pi only takes one --system-prompt and positional user message(s), not a
+// multi-turn array, so we flatten the inherited context into a preamble on
+// the system prompt and pass the new user message positionally.
+
+const PI_BIN = process.env.PI_BIN || "pi";
+const PI_TOOLS_DEFAULT = "read,grep,find,ls"; // read-only for safety
+
+const piMessageText = (content) => {
+  if (!Array.isArray(content)) return "";
+  return content
+    .filter((c) => c && c.type === "text" && typeof c.text === "string")
+    .map((c) => c.text)
+    .join("\n");
+};
+
+// Pi tool result content is `{ content: [{ type:"text", text:"..." }] }`.
+const piResultText = (result) => {
+  if (!result) return "";
+  if (typeof result === "string") return result;
+  if (Array.isArray(result.content)) {
+    return result.content
+      .map((c) => (typeof c === "string" ? c : c?.text || ""))
+      .filter(Boolean)
+      .join("\n");
+  }
+  if (typeof result.output === "string") return result.output;
+  return "";
+};
+
+// Map a pi JSONL event to a Node-shaped step (or null to skip).
+//
+// Pi event shapes (verified):
+//   message_end       — role=user (echo, skip) or role=assistant (emit if it
+//                       has any text content; toolCalls inside content are
+//                       NOT emitted here — they arrive as tool_execution_start).
+//   tool_execution_start — { toolName, args, toolCallId } → tool_use step
+//   tool_execution_end   — { toolName, result, isError } → tool_result step
+//   session, agent_start, turn_start, turn_end, message_start, message_update,
+//   agent_end → bookkeeping, ignored.
+const piEventToNode = (ev, ctx) => {
+  if (!ev || typeof ev !== "object") return null;
+  const { rootNodeId, traceId, stepIdx, model, ts } = ctx;
+  const nodeBase = (kind) => ({
+    id: `${rootNodeId}_s${stepIdx.toString().padStart(3, "0")}`,
+    traceId,
+    parent: rootNodeId,
+    kind,
+    isBranch: true,
+    branchKind: "experiment",
+    branchLabel: kind,
+    status: "ok",
+    timestamp: ts,
+    inputTokens: 0,
+    outputTokens: 0,
+    cost: 0,
+    latency: 0,
+    ttft: 0,
+    tools: [],
+    files: [],
+    toolCalls: [],
+    decision: { goal: "", options: [], why: "" },
+    _stepIndex: stepIdx,
+    _stepKind: "assistant",
+  });
+
+  if (ev.type === "message_end" && ev.message?.role === "assistant") {
+    const text = piMessageText(ev.message.content);
+    // toolCalls inside the assistant message are reflected in the panel for
+    // visibility, but their actual execution is its own step (tool_execution_*).
+    const toolCalls = (ev.message.content || [])
+      .filter((c) => c && (c.type === "toolCall" || c.type === "tool_use"))
+      .map((c) => ({ name: c.name, input: c.input ?? c.args }));
+    if (!text && !toolCalls.length) return null;
+    const u = ev.message.usage || {};
+    const node = nodeBase("llm");
+    node.label = text ? "assistant" : `plan · ${toolCalls.map((t) => t.name).join(",")}`;
+    node.model = ev.message.model || model;
+    node.provider = ev.message.provider || "opencode-go";
+    node.summary = (text || node.label).slice(0, 140);
+    node.input = "";
+    node.output = text;
+    node.inputTokens = Number(u.input) || 0;
+    node.outputTokens = Number(u.output) || 0;
+    node.toolCalls = toolCalls;
+    node._stepKind = "assistant";
+    return node;
+  }
+
+  if (ev.type === "tool_execution_start") {
+    const name = ev.toolName || "tool";
+    const input = ev.args ?? ev.input ?? {};
+    const node = nodeBase("tool");
+    node.label = `tool · ${name}`;
+    node.model = model;
+    node.summary = name;
+    node.input = JSON.stringify(input).slice(0, 400);
+    node.output = "";
+    node.tools = [name];
+    node.toolCalls = [{ name, input }];
+    node._stepKind = "tool_use";
+    return node;
+  }
+
+  if (ev.type === "tool_execution_end") {
+    const name = ev.toolName || "tool";
+    const out = piResultText(ev.result) || (ev.isError ? "[tool error]" : "");
+    const node = nodeBase("tool");
+    node.label = `result · ${name}`;
+    node.model = model;
+    node.summary = (out || "").slice(0, 140);
+    node.input = "";
+    node.output = out;
+    node.tools = [name];
+    node._stepKind = "tool_result";
+    if (ev.isError) node.status = "error";
+    return node;
+  }
+
+  return null;
+};
+
+const runVariantPi = async ({ variant, rootNodeId, traceId, ts, onStep }) => {
+  if (!OPENCODE_KEY) throw new Error("OPENCODE_GO_API_KEY not set");
+
+  // Flatten inherited context into the system prompt as a preamble.
+  const ctx = (variant.context || []).filter(
+    (c) =>
+      c &&
+      ALLOWED_ROLES.has(c.role) &&
+      c.enabled !== false &&
+      typeof c.content === "string"
+  );
+  const systemMsg = ctx.find((c) => c.role === "system")?.content || "";
+  const priorTurns = ctx
+    .filter((c) => c.role !== "system")
+    .map((c) =>
+      c.role === "tool_result"
+        ? `TOOL_RESULT: ${c.content}`
+        : `${c.role.toUpperCase()}: ${c.content}`
+    )
+    .join("\n\n");
+  const systemPrompt = priorTurns
+    ? (systemMsg
+        ? `${systemMsg}\n\n--- Prior conversation (context only) ---\n${priorTurns}`
+        : `--- Prior conversation (context only) ---\n${priorTurns}`)
+    : systemMsg;
+
+  const model = variant.model || OPENCODE_MODEL;
+  const args = [
+    "-p",
+    "--mode", "json",
+    "--no-session",
+    "--no-context-files",
+    "--no-extensions",
+    "--no-skills",
+    "--no-prompt-templates",
+    "--no-themes",
+    "--provider", "opencode-go",
+    "--model", model,
+    "--tools", variant.tools || PI_TOOLS_DEFAULT,
+    "--thinking", variant.thinking || "low",
+    "--offline",
+  ];
+  if (systemPrompt) args.push("--system-prompt", systemPrompt);
+  args.push(variant.userMessage || "");
+
+  const env = {
+    ...process.env,
+    OPENCODE_API_KEY: OPENCODE_KEY,
+    PI_OFFLINE: "1",
+  };
+
+  return new Promise((resolve) => {
+    let child;
+    try {
+      child = spawn(PI_BIN, args, { env, stdio: ["ignore", "pipe", "pipe"] });
+    } catch (e) {
+      resolve({ ok: false, finalText: "", inputTokens: 0, outputTokens: 0, stderr: String(e.message || e) });
+      return;
+    }
+
+    let buf = "";
+    let stepIdx = 1; // root is index 0
+    let totalIn = 0;
+    let totalOut = 0;
+    let finalText = "";
+    let stderr = "";
+    const pending = [];
+
+    child.stderr.on("data", (d) => {
+      stderr += d.toString();
+      if (stderr.length > 4000) stderr = stderr.slice(-4000);
+    });
+
+    child.stdout.on("data", (chunk) => {
+      buf += chunk.toString();
+      let nl;
+      while ((nl = buf.indexOf("\n")) >= 0) {
+        const line = buf.slice(0, nl);
+        buf = buf.slice(nl + 1);
+        if (!line.trim()) continue;
+        let ev;
+        try { ev = JSON.parse(line); } catch { continue; }
+
+        // Track usage + final assistant text for the root row.
+        if (ev.type === "message_end" && ev.message?.role === "assistant") {
+          const u = ev.message.usage || {};
+          totalIn += Number(u.input) || 0;
+          totalOut += Number(u.output) || 0;
+          const t = piMessageText(ev.message.content);
+          if (t) finalText = t; // last assistant message text → root.output
+        }
+
+        const node = piEventToNode(ev, { rootNodeId, traceId, stepIdx, model, ts });
+        if (!node) continue;
+        stepIdx += 1;
+        pending.push(Promise.resolve(onStep(node)).catch(() => {}));
+      }
+    });
+
+    child.on("error", (e) => {
+      stderr += `\n[spawn error] ${e.message}`;
+    });
+
+    child.on("close", async (code) => {
+      await Promise.allSettled(pending);
+      resolve({
+        ok: code === 0,
+        finalText,
+        inputTokens: totalIn,
+        outputTokens: totalOut,
+        stderr: stderr.slice(0, 1000),
+      });
+    });
+  });
+};
+
+// v1: single chat/completion per variant, returns { nodes } JSON.
+// Still used by the React mock app at :8765 (branch.jsx → app.jsx).
+const handlePostBranchRun = async (req, res) => {
+  if (!authedOrLocal(req)) return json(res, 401, { error: "unauthorized" });
+  let body;
+  try {
+    body = JSON.parse(await readBody(req));
+  } catch (e) {
+    return json(res, 400, { error: "invalid json", detail: String(e.message) });
+  }
+  const { sourceNodeId, traceId, parentNodeId, variants } = body || {};
+  if (!sourceNodeId || !SAFE_ID.test(sourceNodeId))
+    return json(res, 400, { error: "sourceNodeId required" });
+  if (!traceId || !SAFE_ID.test(traceId))
+    return json(res, 400, { error: "traceId required" });
+  if (typeof parentNodeId !== "string" || (parentNodeId !== "" && !SAFE_ID.test(parentNodeId)))
+    return json(res, 400, { error: "parentNodeId must be a string" });
+  if (!Array.isArray(variants) || variants.length < 1 || variants.length > 6)
+    return json(res, 400, { error: "variants must be array of length 1..6" });
+
+  const ts = new Date().toISOString();
+
+  const tasks = variants.map(async (variant, i) => {
+    const branchKind = ALLOWED_BRANCH_KINDS.has(variant.branchKind)
+      ? variant.branchKind
+      : "experiment";
+    const branchLabel = (variant.label || `variant ${String.fromCharCode(65 + i)}`).slice(0, 64);
+    const model = variant.model || OPENCODE_MODEL || "qwen3.6-plus";
+    const provider = variant.provider || "opencode-go";
+    const nodeId = `${sourceNodeId}_b_${randHex(3)}`;
+
+    let r, status, errMsg;
+    try {
+      r = await runVariant({ variant });
+      status = "ok";
+    } catch (e) {
+      status = "error";
+      errMsg = String(e.message || e).slice(0, 1000);
+      r = { output: `[error] ${errMsg}`, inputTokens: 0, outputTokens: 0, latency: 0, sentMessages: [] };
+    }
+
+    const node = {
+      id: nodeId, traceId, parent: parentNodeId || null, kind: "llm", label: branchLabel,
+      summary: status === "ok" ? r.output.slice(0, 140) : `error: ${(errMsg || "").slice(0, 120)}`,
+      model, provider, tools: [], files: [],
+      inputTokens: r.inputTokens, outputTokens: r.outputTokens, cost: 0, latency: r.latency, ttft: 0,
+      status, timestamp: ts,
+      input: flattenMessagesForInput(r.sentMessages), output: r.output, toolCalls: [],
+      decision: { goal: variant.userMessage || "", options: [], why: "branch run" },
+      isBranch: true, branchLabel, branchKind,
+    };
+
+    const spec = {
+      sourceNodeId, traceId, model, provider,
+      temperature: typeof variant.temperature === "number" ? variant.temperature : 0.3,
+      topP: typeof variant.topP === "number" ? variant.topP : 0.95,
+      maxOutputTokens: variant.maxOutputTokens,
+      userMessage: variant.userMessage || "",
+      context: variant.context || [],
+      label: branchLabel, branchKind,
+    };
+
+    await pool.query(
+      `INSERT INTO branch_nodes
+         (node_id, trace_id, source_node_id, parent_node_id, branch_kind, branch_label,
+          model, provider, spec, result, status, error, root_branch_node_id, step_index, step_kind)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10::jsonb,$11,$12,$1,0,'assistant')
+       ON CONFLICT (trace_id, node_id) DO NOTHING`,
+      [nodeId, traceId, sourceNodeId, parentNodeId || "", branchKind, branchLabel,
+       model, provider, JSON.stringify(spec), JSON.stringify(node), status, errMsg || null]
+    );
+    return node;
+  });
+
+  const nodes = await Promise.all(tasks);
+  return json(res, 200, { nodes });
+};
+
+// v2: stream ndjson lines as the pi agent emits steps. Each variant produces
+// a "root" node (sibling of the source) plus N "step" nodes (children of the
+// root). The dashboard reads the stream and appends nodes to the tree live.
+const handlePostBranchRunStream = async (req, res) => {
+  if (!authedOrLocal(req)) return json(res, 401, { error: "unauthorized" });
+  let body;
+  try {
+    body = JSON.parse(await readBody(req));
+  } catch (e) {
+    return json(res, 400, { error: "invalid json", detail: String(e.message) });
+  }
+  const { sourceNodeId, traceId, parentNodeId, variants } = body || {};
+  if (!sourceNodeId || !SAFE_ID.test(sourceNodeId))
+    return json(res, 400, { error: "sourceNodeId required" });
+  if (!traceId || !SAFE_ID.test(traceId))
+    return json(res, 400, { error: "traceId required" });
+  if (typeof parentNodeId !== "string" || (parentNodeId !== "" && !SAFE_ID.test(parentNodeId)))
+    return json(res, 400, { error: "parentNodeId must be a string" });
+  if (!Array.isArray(variants) || variants.length < 1 || variants.length > 6)
+    return json(res, 400, { error: "variants must be array of length 1..6" });
+
+  res.writeHead(200, {
+    "content-type": "application/x-ndjson",
+    "cache-control": "no-cache, no-transform",
+    "x-accel-buffering": "no",
+    "transfer-encoding": "chunked",
+    "access-control-allow-origin": req.headers.origin || "*",
+  });
+  const write = (obj) => {
+    try { res.write(JSON.stringify(obj) + "\n"); } catch {}
+  };
+  const ts = new Date().toISOString();
+
+  await Promise.all(
+    variants.map(async (variant, i) => {
+      const branchKind = ALLOWED_BRANCH_KINDS.has(variant.branchKind)
+        ? variant.branchKind
+        : "experiment";
+      const branchLabel = (variant.label || `variant ${String.fromCharCode(65 + i)}`).slice(0, 64);
+      const model = variant.model || OPENCODE_MODEL || "qwen3.6-plus";
+      const provider = variant.provider || "opencode-go";
+      const rootId = `${sourceNodeId}_b_${randHex(3)}`;
+
+      const rootNode = {
+        id: rootId,
+        traceId,
+        parent: parentNodeId || null,
+        kind: "llm",
+        label: branchLabel,
+        summary: "running…",
+        model,
+        provider,
+        tools: [],
+        files: [],
+        inputTokens: 0,
+        outputTokens: 0,
+        cost: 0,
+        latency: 0,
+        ttft: 0,
+        status: "running",
+        timestamp: ts,
+        input: variant.userMessage || "",
+        output: "",
+        toolCalls: [],
+        decision: {
+          goal: variant.userMessage || "",
+          options: [],
+          why: "branch run",
+        },
+        isBranch: true,
+        branchLabel,
+        branchKind,
+      };
+
+      const spec = {
+        sourceNodeId,
+        traceId,
+        model,
+        provider,
+        temperature: typeof variant.temperature === "number" ? variant.temperature : 0.3,
+        topP: typeof variant.topP === "number" ? variant.topP : 0.95,
+        maxOutputTokens: variant.maxOutputTokens,
+        userMessage: variant.userMessage || "",
+        context: variant.context || [],
+        label: branchLabel,
+        branchKind,
+        tools: variant.tools || PI_TOOLS_DEFAULT,
+        thinking: variant.thinking || "low",
+      };
+
+      // 1. Persist + emit running root.
+      try {
+        await pool.query(
+          `INSERT INTO branch_nodes
+             (node_id, trace_id, source_node_id, parent_node_id, branch_kind, branch_label,
+              model, provider, spec, result, status, root_branch_node_id, step_index, step_kind)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10::jsonb,$11,$1,0,'assistant')
+           ON CONFLICT (trace_id, node_id) DO NOTHING`,
+          [
+            rootId,
+            traceId,
+            sourceNodeId,
+            parentNodeId || "",
+            branchKind,
+            branchLabel,
+            model,
+            provider,
+            JSON.stringify(spec),
+            JSON.stringify(rootNode),
+            "running",
+          ]
+        );
+      } catch (e) {
+        console.warn("branch root insert failed:", e.message);
+      }
+      write({ type: "root", variantIdx: i, node: rootNode });
+
+      // 2. Stream pi steps as they arrive. Each step is persisted and
+      //    forwarded to the client; the root is updated at the end.
+      const t0 = Date.now();
+      const result = await runVariantPi({
+        variant,
+        rootNodeId: rootId,
+        traceId,
+        ts,
+        onStep: async (stepNode) => {
+          stepNode.timestamp = new Date().toISOString();
+          stepNode.branchKind = branchKind;
+          try {
+            await pool.query(
+              `INSERT INTO branch_nodes
+                 (node_id, trace_id, source_node_id, parent_node_id, branch_kind, branch_label,
+                  model, provider, spec, result, status, root_branch_node_id, step_index, step_kind)
+               VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'{}'::jsonb,$9::jsonb,$10,$11,$12,$13)
+               ON CONFLICT (trace_id, node_id) DO NOTHING`,
+              [
+                stepNode.id,
+                traceId,
+                sourceNodeId,
+                stepNode.parent,
+                branchKind,
+                stepNode.label || branchLabel,
+                stepNode.model || model,
+                provider,
+                JSON.stringify(stepNode),
+                stepNode.status || "ok",
+                rootId,
+                stepNode._stepIndex,
+                stepNode._stepKind || "assistant",
+              ]
+            );
+          } catch (e) {
+            console.warn("branch step insert failed:", e.message);
+          }
+          write({ type: "step", variantIdx: i, node: stepNode });
+        },
+      });
+
+      // 3. Finalize the root row + emit variant_done.
+      rootNode.status = result.ok ? "ok" : "error";
+      rootNode.output = result.finalText
+        || (result.ok ? "" : `[pi exit] ${result.stderr.slice(0, 400)}`);
+      rootNode.summary = result.ok
+        ? rootNode.output.slice(0, 140)
+        : `error: ${result.stderr.slice(0, 120)}`;
+      rootNode.inputTokens = result.inputTokens;
+      rootNode.outputTokens = result.outputTokens;
+      rootNode.latency = Date.now() - t0;
+      try {
+        await pool.query(
+          `UPDATE branch_nodes
+             SET result = $1::jsonb, status = $2, error = $3
+           WHERE trace_id = $4 AND node_id = $5`,
+          [
+            JSON.stringify(rootNode),
+            rootNode.status,
+            result.ok ? null : result.stderr.slice(0, 1000),
+            traceId,
+            rootId,
+          ]
+        );
+      } catch (e) {
+        console.warn("branch root update failed:", e.message);
+      }
+      write({ type: "variant_done", variantIdx: i, status: rootNode.status, rootNode });
+    })
+  );
+
+  write({ type: "done" });
+  res.end();
+};
+
+const handleGetBranchNodes = async (req, res) => {
+  if (!authedOrLocal(req)) return json(res, 401, { error: "unauthorized" });
+  const url = new URL(req.url, `http://${req.headers.host}`);
+  const traceId = url.searchParams.get("traceId");
+  if (!traceId || !SAFE_ID.test(traceId))
+    return json(res, 400, { error: "traceId required" });
+  const { rows } = await pool.query(
+    `SELECT result FROM branch_nodes WHERE trace_id = $1 ORDER BY created_at ASC`,
+    [traceId]
+  );
+  return json(res, 200, { nodes: rows.map((r) => r.result) });
+};
+
+const handlePostExperiment = async (req, res) => {
+  if (!authedOrLocal(req)) return json(res, 401, { error: "unauthorized" });
+  let body;
+  try {
+    body = JSON.parse(await readBody(req));
+  } catch (e) {
+    return json(res, 400, { error: "invalid json", detail: String(e.message) });
+  }
+  const { id, name, notes, specs } = body || {};
+  if (!name || typeof name !== "string")
+    return json(res, 400, { error: "name required" });
+  if (!Array.isArray(specs) || !specs.length)
+    return json(res, 400, { error: "specs[] required" });
+  const expId = id && SAFE_ID.test(id) ? id : `exp_${randHex(4)}`;
+  await pool.query(
+    `INSERT INTO branch_experiments (id, name, notes, specs)
+     VALUES ($1, $2, $3, $4::jsonb)
+     ON CONFLICT (id) DO UPDATE
+       SET name = EXCLUDED.name,
+           notes = EXCLUDED.notes,
+           specs = EXCLUDED.specs,
+           updated_at = NOW()`,
+    [expId, name, notes || null, JSON.stringify(specs)]
+  );
+  return json(res, 200, { id: expId, name, notes: notes || null, specs });
+};
+
+const handleGetExperiments = async (req, res) => {
+  if (!authedOrLocal(req)) return json(res, 401, { error: "unauthorized" });
+  const { rows } = await pool.query(
+    `SELECT id, name, notes, specs, created_at, updated_at
+       FROM branch_experiments
+      ORDER BY updated_at DESC
+      LIMIT 100`
+  );
+  return json(res, 200, {
+    experiments: rows.map((r) => ({
+      id: r.id,
+      name: r.name,
+      notes: r.notes,
+      specs: r.specs,
+      createdAt: r.created_at,
+      updatedAt: r.updated_at,
+    })),
+  });
+};
+
+const handleGetExperiment = async (req, res, id) => {
+  if (!authedOrLocal(req)) return json(res, 401, { error: "unauthorized" });
+  if (!SAFE_ID.test(id)) return json(res, 400, { error: "bad id" });
+  const { rows } = await pool.query(
+    `SELECT id, name, notes, specs, created_at, updated_at
+       FROM branch_experiments WHERE id = $1`,
+    [id]
+  );
+  if (!rows.length) return json(res, 404, { error: "not_found" });
+  const r = rows[0];
+  return json(res, 200, {
+    id: r.id,
+    name: r.name,
+    notes: r.notes,
+    specs: r.specs,
+    createdAt: r.created_at,
+    updatedAt: r.updated_at,
+  });
+};
+
+const handleDeleteExperiment = async (req, res, id) => {
+  if (!authedOrLocal(req)) return json(res, 401, { error: "unauthorized" });
+  if (!SAFE_ID.test(id)) return json(res, 400, { error: "bad id" });
+  await pool.query(`DELETE FROM branch_experiments WHERE id = $1`, [id]);
+  return json(res, 200, { ok: true });
+};
+
 const server = createServer(async (req, res) => {
   try {
+    // Permissive CORS for local dev. The frontend loads from file:// or
+    // a local static server while talking to localhost:4000.
+    res.setHeader("access-control-allow-origin", "*");
+    res.setHeader("access-control-allow-methods", "GET,POST,DELETE,PATCH,OPTIONS");
+    res.setHeader("access-control-allow-headers", "content-type, authorization");
+    if (req.method === "OPTIONS") {
+      res.writeHead(204);
+      return res.end();
+    }
     const url = new URL(req.url, `http://${req.headers.host}`);
     const path = url.pathname;
 
@@ -1372,7 +2206,11 @@ const server = createServer(async (req, res) => {
       }
     }
     if (path === "/ingest/events" && req.method === "POST") return handlePostEvents(req, res);
+    if (path === "/ingest/embed" && req.method === "POST") return handlePostEmbed(req, res);
+    if (path === "/ingest/admin/backfill-memories" && req.method === "POST") return handlePostBackfillMemories(req, res);
     if (path === "/traces" && req.method === "GET") return handleListTraces(req, res);
+    if (path === "/traces" && req.method === "DELETE") return handleDeleteAllTraces(req, res);
+    if (path === "/memory" && req.method === "DELETE") return handleDeleteAllMemories(req, res);
     if (path === "/memory/recent" && req.method === "GET") return handleGetMemoryRecent(req, res);
     if (path === "/memory/projects" && req.method === "GET") return handleGetMemoryProjects(req, res);
     if (path === "/memory/graph" && req.method === "GET") return handleGetMemoryGraph(req, res);
@@ -1388,6 +2226,15 @@ const server = createServer(async (req, res) => {
     if (path === "/codegraph/repo/edges" && req.method === "GET") return handleGetCodegraphRepoEdges(req, res);
     if (path === "/codegraph/impact" && req.method === "GET") return handleGetCodegraphImpact(req, res);
     if (path === "/codegraph/file/memories" && req.method === "GET") return handleGetCodegraphFileMemories(req, res);
+
+    if (path === "/branch/run" && req.method === "POST") return handlePostBranchRun(req, res);
+    if (path === "/branch/run/stream" && req.method === "POST") return handlePostBranchRunStream(req, res);
+    if (path === "/branch/nodes" && req.method === "GET") return handleGetBranchNodes(req, res);
+    if (path === "/experiments" && req.method === "POST") return handlePostExperiment(req, res);
+    if (path === "/experiments" && req.method === "GET") return handleGetExperiments(req, res);
+    const exp = path.match(/^\/experiments\/([A-Za-z0-9_-]+)$/);
+    if (exp && req.method === "GET") return handleGetExperiment(req, res, exp[1]);
+    if (exp && req.method === "DELETE") return handleDeleteExperiment(req, res, exp[1]);
 
     const cgs = path.match(/^\/codegraph\/symbol\/(\d+)$/);
     if (cgs && req.method === "GET") return handleGetCodegraphSymbol(req, res, cgs[1]);

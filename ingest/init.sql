@@ -99,3 +99,42 @@ CREATE TABLE IF NOT EXISTS codegraph_calls (
 );
 CREATE INDEX IF NOT EXISTS idx_codegraph_calls_from ON codegraph_calls(from_symbol_id);
 CREATE INDEX IF NOT EXISTS idx_codegraph_calls_to   ON codegraph_calls(to_symbol_id);
+
+-- ─── A/B branch experiments ───────────────────────────────────────────────
+-- Each row is one variant submission persisted as a Node-shaped result.
+CREATE TABLE IF NOT EXISTS branch_nodes (
+  id             BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  node_id        TEXT        NOT NULL,
+  trace_id       TEXT        NOT NULL,
+  source_node_id TEXT        NOT NULL,
+  parent_node_id TEXT        NOT NULL,
+  branch_kind    TEXT        NOT NULL DEFAULT 'experiment',
+  branch_label   TEXT,
+  model          TEXT        NOT NULL,
+  provider       TEXT        NOT NULL DEFAULT 'opencode-go',
+  spec           JSONB       NOT NULL,
+  result         JSONB       NOT NULL,
+  status         TEXT        NOT NULL,
+  error          TEXT,
+  created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (trace_id, node_id)
+);
+CREATE INDEX IF NOT EXISTS idx_branch_nodes_trace  ON branch_nodes(trace_id);
+CREATE INDEX IF NOT EXISTS idx_branch_nodes_parent ON branch_nodes(trace_id, parent_node_id);
+-- v2: agent sub-tree columns. The root row groups all step rows that share
+-- root_branch_node_id; status='running' is valid until pi exits.
+ALTER TABLE branch_nodes ADD COLUMN IF NOT EXISTS root_branch_node_id TEXT;
+ALTER TABLE branch_nodes ADD COLUMN IF NOT EXISTS step_index INT NOT NULL DEFAULT 0;
+ALTER TABLE branch_nodes ADD COLUMN IF NOT EXISTS step_kind TEXT NOT NULL DEFAULT 'assistant';
+CREATE INDEX IF NOT EXISTS idx_branch_nodes_root ON branch_nodes(trace_id, root_branch_node_id);
+
+-- Saved experiment templates (a SavedExperiment is N specs).
+CREATE TABLE IF NOT EXISTS branch_experiments (
+  id          TEXT        PRIMARY KEY,
+  name        TEXT        NOT NULL,
+  notes       TEXT,
+  specs       JSONB       NOT NULL,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_branch_experiments_recent ON branch_experiments(created_at DESC);

@@ -174,10 +174,11 @@ function Edge({ e }) {
   );
 }
 
-function TreePanel({ selected, onSelect, showBranches, onToggleBranches, variant }) {
+function TreePanel({ selected, onSelect, showBranches, onToggleBranches, variant, nodes }) {
+  const allNodes = nodes || window.NODES;
   const layout = useMemo(
-    () => layoutTree(window.NODES, { includeBranches: showBranches }),
-    [showBranches]
+    () => layoutTree(allNodes, { includeBranches: showBranches }),
+    [showBranches, allNodes]
   );
   const [zoom, setZoom] = useState(1);
   const bodyRef = useRef(null);
