@@ -1,11 +1,16 @@
 // traceframe ingest — Postgres-backed event store.
 //
-//   POST /ingest/events   Authorization: Bearer <key>
+//   POST /ingest/events           Authorization: Bearer <key>
 //       body: { events: Event[] }  → inserts into postgres
 //   GET  /healthz
-//   GET  /traces                 → [{ traceId, eventCount, bytes, updatedAt }]
-//   GET  /traces/:id             → { traceId, events: Event[] }
-//   DELETE /traces/:id           → deletes trace + events
+//   GET  /traces                  → [{ traceId, eventCount, bytes, updatedAt }]
+//   GET  /traces/:id              → { traceId, events: Event[] }
+//   DELETE /traces/:id            → deletes trace + events
+//
+//   POST /optimizer/analyze       → token-waste report for a structured prompt
+//   POST /optimizer/optimize      → apply compression techniques, return optimized prompt
+//   POST /optimizer/experiment    → A/B run: original vs optimized via OpenCode provider
+//   POST /optimizer/pipeline      → full 4-layer pipeline (router→compress→select→guard)
 
 import { createServer } from "node:http";
 import { readFileSync } from "node:fs";
@@ -15,6 +20,7 @@ import { spawn } from "node:child_process";
 import pg from "pg";
 import { indexRepo } from "./codegraph/indexer.mjs";
 import { embedBatch, embedQuery, vectorLiteral } from "./codegraph/embedder.mjs";
+import { analyzePrompt, applyOptimizations, runExperiment, runPipeline } from "./optimizer/index.mjs";
 
 const { Pool } = pg;
 
@@ -2179,6 +2185,36 @@ const handleDeleteExperiment = async (req, res, id) => {
   return json(res, 200, { ok: true });
 };
 
+// ─── Optimizer handlers ───────────────────────────────────────────────────────
+
+const handleOptimizerAnalyze = async (req, res) => {
+  const body = JSON.parse(await readBody(req));
+  const { system, messages, tools } = body;
+  const report = analyzePrompt({ system, messages, tools });
+  return json(res, 200, report);
+};
+
+const handleOptimizerOptimize = async (req, res) => {
+  const body = JSON.parse(await readBody(req));
+  const { system, messages, tools, profile } = body;
+  const result = applyOptimizations({ system, messages, tools }, profile);
+  return json(res, 200, result);
+};
+
+const handleOptimizerExperiment = async (req, res) => {
+  const body = JSON.parse(await readBody(req));
+  const { system, messages, tools, profile, dryRun } = body;
+  const result = await runExperiment({ system, messages, tools, profile, dryRun });
+  return json(res, 200, result);
+};
+
+const handleOptimizerPipeline = async (req, res) => {
+  const body = JSON.parse(await readBody(req));
+  const { system, messages, tools, profile, query, keywords, sessionTurns, handoffCtx } = body;
+  const result = runPipeline({ system, messages, tools, profile, query, keywords, sessionTurns, handoffCtx });
+  return json(res, 200, result);
+};
+
 const server = createServer(async (req, res) => {
   try {
     // Permissive CORS for local dev. The frontend loads from file:// or
@@ -2208,6 +2244,10 @@ const server = createServer(async (req, res) => {
     if (path === "/ingest/events" && req.method === "POST") return handlePostEvents(req, res);
     if (path === "/ingest/embed" && req.method === "POST") return handlePostEmbed(req, res);
     if (path === "/ingest/admin/backfill-memories" && req.method === "POST") return handlePostBackfillMemories(req, res);
+    if (path === "/optimizer/analyze" && req.method === "POST") return handleOptimizerAnalyze(req, res);
+    if (path === "/optimizer/optimize" && req.method === "POST") return handleOptimizerOptimize(req, res);
+    if (path === "/optimizer/experiment" && req.method === "POST") return handleOptimizerExperiment(req, res);
+    if (path === "/optimizer/pipeline" && req.method === "POST") return handleOptimizerPipeline(req, res);
     if (path === "/traces" && req.method === "GET") return handleListTraces(req, res);
     if (path === "/traces" && req.method === "DELETE") return handleDeleteAllTraces(req, res);
     if (path === "/memory" && req.method === "DELETE") return handleDeleteAllMemories(req, res);

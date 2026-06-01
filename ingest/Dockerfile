@@ -41,6 +41,7 @@ COPY server.mjs ./
 COPY dashboard.html ./
 COPY init.sql ./
 COPY codegraph ./codegraph
+COPY optimizer ./optimizer
 
 # Cache directory for transformers.js model downloads (Xenova/all-MiniLM-L6-v2).
 ENV HF_HOME=/app/.cache/huggingface
