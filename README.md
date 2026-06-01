@@ -1,30 +1,30 @@
 # traceframe
 
-LLM agent observability stack — event ingestion, memory distillation, code graph indexing, and prompt optimization.
+A small **memory service** for LLM agents: a pgvector-backed memory store with
+semantic search, a co-located **prompt optimizer**, and a single admin panel.
 
 ## What's inside
 
 | Module | Path | Description |
 |--------|------|-------------|
-| Ingest server | `ingest/server.mjs` | HTTP API (port 4000), PostgreSQL backend |
-| Prompt optimizer | `ingest/optimizer/` | 4-layer token-saving pipeline |
-| Code graph | `ingest/codegraph/` | AST indexer for JS/TS/Python repos |
-| Memory distillation | `ingest/` | Event → memory summarization via LLM |
-| CLI hooks | `bin/traceframe` | Claude Code session hooks (start/stop/tail) |
+| Memory service | `service/server.mjs` | HTTP API (port 4000), PostgreSQL + pgvector |
+| Data layer | `service/db.mjs` | Memory CRUD + semantic search queries |
+| Embedder | `service/embedder.mjs` | Local ONNX embeddings (Xenova/all-MiniLM-L6-v2, 384d) |
+| Prompt optimizer | `service/optimizer/` | 4-layer token-saving pipeline (pure, no network) |
+| Admin panel | `service/public/admin.html` | No-build UI: memory browser + optimizer playground |
 | Wiki | `wiki/` | Obsidian-compatible LLM observability knowledge base |
-| Frontend | `app.jsx`, `memory-graph.jsx` | React dashboards (no build step — Vite/CDN) |
 
 ---
 
 ## Quick start — optimizer (no server needed)
 
-Test the prompt optimizer pipeline locally without Docker or API keys:
+Exercise the optimizer pipeline locally without Docker or API keys:
 
 ```bash
 node bin/test-optimizer.mjs
 ```
 
-Output shows all 4 pipeline layers: Content Router, Compressor, Context Selector, Session Guard — with token savings breakdown.
+Shows all 4 layers — Content Router, Compressor, Context Selector, Session Guard — with token savings.
 
 ---
 
@@ -33,15 +33,14 @@ Output shows all 4 pipeline layers: Content Router, Compressor, Context Selector
 ### Prerequisites
 
 - Docker + Docker Compose
-- OpenCode API key (for LLM calls)
 
 ### 1. Create `.env` in the project root
 
 ```env
 TRACEFRAME_API_KEY=your-secret-key
-OPENCODE_GO_API_KEY=your-opencode-key
-OPENCODE_GO_BASE_URL=https://opencode.ai/zen/go/v1
-OPENCODE_GO_MODEL=deepseek-v4-flash
+POSTGRES_USER=traceframe
+POSTGRES_PASSWORD=traceframe
+POSTGRES_DB=traceframe
 ```
 
 ### 2. Start
@@ -50,68 +49,63 @@ OPENCODE_GO_MODEL=deepseek-v4-flash
 docker-compose up --build
 ```
 
-Postgres runs on port `5434`, ingest server on port `4000`.
+Postgres runs on port `5434`, the service on `4000`. The embedding model
+(~25 MB) downloads on first boot and is cached in the `hf-cache` volume.
 
-### 3. Verify
+### 3. Open the admin panel
 
-```bash
-curl http://localhost:4000/healthz
 ```
+http://localhost:4000/
+```
+
+Enter your `TRACEFRAME_API_KEY` in the top-right field (or skip it — localhost
+requests are allowed without auth). Two tabs:
+
+- **Memories** — browse by project, semantic search, edit/delete, add new memories.
+- **Optimizer** — paste a prompt, pick a profile, see token savings.
 
 ---
 
-## Optimizer API
+## API
 
-The prompt optimizer runs as part of the ingest server. All endpoints require `X-API-Key` header.
+All `/api/*` routes require `Authorization: Bearer <TRACEFRAME_API_KEY>`
+(localhost is exempt). `GET /healthz` and `GET /` are open.
 
-### Analyze a prompt
-
-```bash
-curl -X POST http://localhost:4000/optimizer/analyze \
-  -H "Content-Type: application/json" \
-  -H "X-API-Key: your-secret-key" \
-  -d '{
-    "system": "Please note that you should be helpful",
-    "messages": [{"role": "user", "content": "How do I fix the redirect loop?"}],
-    "tools": []
-  }'
-```
-
-### Optimize (apply techniques)
+### Memory
 
 ```bash
-curl -X POST http://localhost:4000/optimizer/optimize \
-  -H "Content-Type: application/json" \
-  -H "X-API-Key: your-secret-key" \
-  -d '{
-    "system": "...",
-    "messages": [...],
-    "tools": [...],
-    "profile": "balanced"
-  }'
+# create
+curl -X POST http://localhost:4000/api/memories \
+  -H "Authorization: Bearer $TRACEFRAME_API_KEY" -H "Content-Type: application/json" \
+  -d '{"repo_tag":"github-myproject","summary":"Fixed the auth redirect loop by ..."}'
+
+# list a project's memories
+curl "http://localhost:4000/api/memories?repo=github-myproject&limit=20" \
+  -H "Authorization: Bearer $TRACEFRAME_API_KEY"
+
+# semantic search
+curl -X POST http://localhost:4000/api/search \
+  -H "Authorization: Bearer $TRACEFRAME_API_KEY" -H "Content-Type: application/json" \
+  -d '{"query":"how did I fix the redirect loop?","max_results":5}'
 ```
 
-### Full 4-layer pipeline
+Other routes: `GET /api/projects`, `GET /api/memories/:id`,
+`PATCH /api/memories/:id` `{summary}`, `DELETE /api/memories/:id`.
+
+Memories are embedded on write (fire-and-forget); search returns matches ranked
+by cosine similarity (`score` = `1/(1+distance)`, 1.0 = perfect match).
+
+### Optimizer
 
 ```bash
-curl -X POST http://localhost:4000/optimizer/pipeline \
-  -H "Content-Type: application/json" \
-  -H "X-API-Key: your-secret-key" \
-  -d '{
-    "profile": "balanced",
-    "query": "Fix the auth redirect loop",
-    "keywords": ["auth", "middleware"],
-    "system": "...",
-    "messages": [...],
-    "tools": [...],
-    "sessionTurns": [
-      {"turnIndex": 0, "tokens": 1200},
-      {"turnIndex": 1, "tokens": 1350}
-    ]
-  }'
+curl -X POST http://localhost:4000/api/optimizer/pipeline \
+  -H "Authorization: Bearer $TRACEFRAME_API_KEY" -H "Content-Type: application/json" \
+  -d '{"profile":"balanced","system":"...","messages":[...],"tools":[...]}'
 ```
 
-### Profiles
+Routes: `/api/optimizer/analyze`, `/api/optimizer/optimize`, `/api/optimizer/pipeline`.
+
+Profiles:
 
 | Profile | Techniques active |
 |---------|-------------------|
@@ -121,65 +115,16 @@ curl -X POST http://localhost:4000/optimizer/pipeline \
 
 ---
 
-## Optimizer pipeline — how it works
-
-```
-Input prompt
-  ↓ Layer 1 — Content Router     label each message: code/json/shell/markdown/text
-  ↓ Layer 2 — Compressor         type-aware filler removal, dedup, system compression
-  ↓ Layer 3 — Context Selector   Hot/Warm/Cold scoring, drop irrelevant messages
-  ↓ Layer 4 — Session Guard      Waste Factor monitoring, rotation recommendation
-Output: optimized prompt + layered report
-```
-
-**Session Guard** tracks token growth across turns. Waste Factor = `avg(last 3 turns) ÷ avg(first 3 turns)`. Warns at 3×, recommends rotation with a handoff template at 10×.
-
----
-
-## Code graph
-
-Index a local repo:
-
-```bash
-curl -X POST http://localhost:4000/codegraph/index \
-  -H "Content-Type: application/json" \
-  -H "X-API-Key: your-secret-key" \
-  -d '{"repoPath": "/absolute/path/to/repo"}'
-```
-
-Query symbols:
-
-```bash
-curl "http://localhost:4000/codegraph/search?q=authMiddleware&repoPath=/path/to/repo" \
-  -H "X-API-Key: your-secret-key"
-```
-
----
-
-## Claude Code hooks
-
-Install session hooks into Claude Code:
-
-```bash
-bin/traceframe session-start
-bin/traceframe session-stop
-bin/traceframe tail          # stream recent events
-bin/traceframe memory-fetch  # retrieve distilled memories
-```
-
----
-
 ## Environment variables
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `PORT` | `4000` | Ingest server port |
-| `TRACEFRAME_API_KEY` | — | Auth key for all API requests |
+| `PORT` | `4000` | Service port |
+| `TRACEFRAME_API_KEY` | — | Bearer auth key. If unset, token auth fails closed — only loopback requests are accepted |
+| `ALLOW_LOCALHOST` | `1` | Allow unauthenticated loopback requests (dev). Set `0` behind a reverse proxy |
 | `POSTGRES_HOST` | `localhost` | Postgres host |
-| `POSTGRES_PORT` | `5434` | Postgres port |
+| `POSTGRES_PORT` | `5432` | Postgres port (host-mapped to `5434`) |
 | `POSTGRES_USER` | `traceframe` | Postgres user |
 | `POSTGRES_PASSWORD` | `traceframe` | Postgres password |
 | `POSTGRES_DB` | `traceframe` | Postgres database |
-| `OPENCODE_GO_API_KEY` | — | OpenCode API key (for LLM calls) |
-| `OPENCODE_GO_BASE_URL` | `https://opencode.ai/zen/go/v1` | OpenCode base URL |
-| `OPENCODE_GO_MODEL` | `deepseek-v4-flash` | Model to use |
+| `TRANSFORMERS_CACHE` | `/app/.cache/huggingface` | Embedding model cache dir |

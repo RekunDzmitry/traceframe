@@ -3,9 +3,9 @@
 // Run: node bin/test-optimizer.mjs
 // No server or API keys required.
 
-import { runPipeline } from "../ingest/optimizer/pipeline.mjs";
-import { detectContentType } from "../ingest/optimizer/content-router.mjs";
-import { evaluateSession, buildHandoff } from "../ingest/optimizer/session-guard.mjs";
+import { runPipeline } from "../service/optimizer/pipeline.mjs";
+import { detectContentType } from "../service/optimizer/content-router.mjs";
+import { evaluateSession, buildHandoff } from "../service/optimizer/session-guard.mjs";
 
 const RESET = "\x1b[0m";
 const BOLD = "\x1b[1m";
