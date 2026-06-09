@@ -20,6 +20,7 @@ import pg from "pg";
 import { indexRepo } from "./codegraph/indexer.mjs";
 import { embedQuery, vectorLiteral } from "./codegraph/embedder.mjs";
 import { analyzePrompt, applyOptimizations, runExperiment, runPipeline } from "./optimizer/index.mjs";
+import { handleProxy } from "./proxy/handler.mjs";
 
 const { Pool } = pg;
 
@@ -1408,6 +1409,13 @@ const server = createServer(async (req, res) => {
       }
     }
     if (path === "/ingest/events" && req.method === "POST") return handlePostEvents(req, res);
+
+    // ── Proxy: POST /v1/messages — optimize + forward to Anthropic ──
+    if (path === "/v1/messages" && req.method === "POST") {
+      const body = await readBody(req);
+      return handleProxy(req, res, body);
+    }
+
     if (path === "/optimizer/analyze" && req.method === "POST") return handleOptimizerAnalyze(req, res);
     if (path === "/optimizer/optimize" && req.method === "POST") return handleOptimizerOptimize(req, res);
     if (path === "/optimizer/experiment" && req.method === "POST") return handleOptimizerExperiment(req, res);
