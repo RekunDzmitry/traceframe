@@ -1412,6 +1412,7 @@ const server = createServer(async (req, res) => {
 
     // ── Proxy: POST /v1/messages — optimize + forward to Anthropic ──
     if (path === "/v1/messages" && req.method === "POST") {
+      if (!authedOrLocal(req)) return json(res, 401, { error: "unauthorized" });
       const body = await readBody(req);
       return handleProxy(req, res, body);
     }

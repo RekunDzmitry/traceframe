@@ -66,8 +66,9 @@ export async function handleProxy(req, res, body) {
       }),
     });
   } catch (err) {
+    console.error("Proxy upstream error:", err.message);
     res.writeHead(502, { "content-type": "application/json" });
-    return res.end(JSON.stringify({ error: "Upstream request failed", detail: err.message }));
+    return res.end(JSON.stringify({ error: "Upstream request failed" }));
   }
 
   const responseBody = await anthropicRes.text();
