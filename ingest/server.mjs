@@ -1389,7 +1389,9 @@ const handleGetCodegraphFileMemories = async (req, res) => {
 const handleGetProxyStats = async (req, res) => {
   if (!authedOrLocal(req)) return json(res, 401, { error: "unauthorized" });
   const url = new URL(req.url, `http://${req.headers.host}`);
-  const since = url.searchParams.get("since");
+  const sinceRaw = url.searchParams.get("since");
+  // Accept ISO 8601 timestamps only to prevent unexpected Postgres cast behavior.
+  const since = sinceRaw && /^\d{4}-\d{2}-\d{2}(T[\d:.Z+-]*)?$/.test(sinceRaw) ? sinceRaw : null;
   const sinceClause = since ? `WHERE requested_at >= $1` : "";
   const params = since ? [since] : [];
 
