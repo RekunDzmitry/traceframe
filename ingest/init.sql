@@ -99,3 +99,21 @@ CREATE TABLE IF NOT EXISTS codegraph_calls (
 );
 CREATE INDEX IF NOT EXISTS idx_codegraph_calls_from ON codegraph_calls(from_symbol_id);
 CREATE INDEX IF NOT EXISTS idx_codegraph_calls_to   ON codegraph_calls(to_symbol_id);
+
+-- ─── Proxy optimization telemetry ────────────────────────────────────────────
+-- One row per /v1/messages request that passed through the optimizer proxy.
+
+CREATE TABLE IF NOT EXISTS proxy_stats (
+  id              BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  trace_id        TEXT        REFERENCES traces(trace_id) ON DELETE SET NULL,
+  requested_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  profile         TEXT        NOT NULL DEFAULT 'balanced',
+  model           TEXT,
+  input_tokens    INT         NOT NULL DEFAULT 0,
+  output_tokens   INT         NOT NULL DEFAULT 0,
+  saved_tokens    INT         NOT NULL DEFAULT 0,
+  saved_pct       INT         NOT NULL DEFAULT 0,
+  meta            JSONB       NOT NULL DEFAULT '{}'::jsonb
+);
+CREATE INDEX IF NOT EXISTS idx_proxy_stats_trace ON proxy_stats(trace_id);
+CREATE INDEX IF NOT EXISTS idx_proxy_stats_at    ON proxy_stats(requested_at DESC);

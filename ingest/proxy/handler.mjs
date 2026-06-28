@@ -9,15 +9,17 @@ import { runPipeline } from "../optimizer/pipeline.mjs";
 
 const ANTHROPIC_API = "https://api.anthropic.com/v1/messages";
 const ANTHROPIC_VERSION = "2023-06-01";
+const TRACE_ID_RE = /^[A-Za-z0-9_-]{1,128}$/;
 
 /**
  * Handle POST /v1/messages — optimize then proxy to Anthropic.
  *
- * @param {object} req  Node.js IncomingMessage
- * @param {object} res  Node.js ServerResponse
- * @param {string} body Raw request body (already read by caller)
+ * @param {object} req   Node.js IncomingMessage
+ * @param {object} res   Node.js ServerResponse
+ * @param {string} body  Raw request body (already read by caller)
+ * @param {object} [pool] pg.Pool — if provided, optimization stats are persisted
  */
-export async function handleProxy(req, res, body) {
+export async function handleProxy(req, res, body, pool) {
   let payload;
   try {
     payload = JSON.parse(body);
@@ -36,17 +38,18 @@ export async function handleProxy(req, res, body) {
   }
 
   const { system = "", messages = [], tools = [], ...rest } = payload;
+  const profile = req.headers["x-traceframe-profile"] || "balanced";
 
   // ── Optimize ────────────────────────────────────────────────
-  const optimized = runPipeline({
+  const optimized = await runPipeline({
     system,
     messages,
     tools,
-    profile: req.headers["x-traceframe-profile"] || "balanced",
+    profile,
     query: messages.filter((m) => m.role === "user").slice(-1)[0]?.content || "",
   });
 
-  const { savedTokens, savedPct } = optimized.report;
+  const { savedTokens, savedPct, inputTokens, outputTokens } = optimized.report;
 
   // ── Forward to Anthropic ────────────────────────────────────
   let anthropicRes;
@@ -73,13 +76,36 @@ export async function handleProxy(req, res, body) {
 
   const responseBody = await anthropicRes.text();
 
+  // ── Persist optimization stats ──────────────────────────────
+  if (pool) {
+    let responseJson;
+    try { responseJson = JSON.parse(responseBody); } catch {}
+    const traceIdRaw = req.headers["x-traceframe-trace-id"] || null;
+    const traceId = traceIdRaw && TRACE_ID_RE.test(traceIdRaw) ? traceIdRaw : null;
+    pool.query(
+      `INSERT INTO proxy_stats
+         (trace_id, profile, model, input_tokens, output_tokens, saved_tokens, saved_pct, meta)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+      [
+        traceId,
+        profile,
+        responseJson?.model || payload.model || null,
+        inputTokens,
+        outputTokens,
+        savedTokens,
+        savedPct,
+        JSON.stringify({ layers: optimized.report.layers, anthropicUsage: responseJson?.usage || null }),
+      ]
+    ).catch((e) => console.error("proxy_stats insert:", e.message));
+  }
+
   // ── Reply with LLM response + traceframe report headers ────
   res.writeHead(anthropicRes.status, {
     "content-type": "application/json",
     "x-traceframe-saved-tokens": String(savedTokens),
     "x-traceframe-saved-pct": String(savedPct),
-    "x-traceframe-input-tokens": String(optimized.report.inputTokens),
-    "x-traceframe-output-tokens": String(optimized.report.outputTokens),
+    "x-traceframe-input-tokens": String(inputTokens),
+    "x-traceframe-output-tokens": String(outputTokens),
   });
   return res.end(responseBody);
 }

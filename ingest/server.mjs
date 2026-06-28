@@ -344,6 +344,24 @@ const ensureSchema = async () => {
     } catch (e) {
       console.warn("pgvector setup skipped:", e.message);
     }
+
+    // Proxy optimization telemetry
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS proxy_stats (
+        id              BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+        trace_id        TEXT        REFERENCES traces(trace_id) ON DELETE SET NULL,
+        requested_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        profile         TEXT        NOT NULL DEFAULT 'balanced',
+        model           TEXT,
+        input_tokens    INT         NOT NULL DEFAULT 0,
+        output_tokens   INT         NOT NULL DEFAULT 0,
+        saved_tokens    INT         NOT NULL DEFAULT 0,
+        saved_pct       INT         NOT NULL DEFAULT 0,
+        meta            JSONB       NOT NULL DEFAULT '{}'::jsonb
+      )
+    `);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_proxy_stats_trace ON proxy_stats(trace_id)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_proxy_stats_at    ON proxy_stats(requested_at DESC)`);
   } catch (e) {
     console.warn("ensureSchema failed:", e.message);
   }
@@ -1361,6 +1379,57 @@ const handleGetCodegraphFileMemories = async (req, res) => {
   });
 };
 
+// ─── Proxy stats handler ─────────────────────────────────────────────────────
+
+const handleGetProxyStats = async (req, res) => {
+  if (!authedOrLocal(req)) return json(res, 401, { error: "unauthorized" });
+  const url = new URL(req.url, `http://${req.headers.host}`);
+  const since = url.searchParams.get("since");
+  const sinceClause = since ? `WHERE requested_at >= $1` : "";
+  const params = since ? [since] : [];
+
+  const { rows } = await pool.query(
+    `SELECT
+       COUNT(*)::int                          AS total_requests,
+       COALESCE(SUM(saved_tokens), 0)::bigint AS total_saved_tokens,
+       COALESCE(AVG(saved_pct), 0)::numeric   AS avg_saved_pct,
+       COALESCE(SUM(input_tokens), 0)::bigint AS total_input_tokens,
+       COALESCE(SUM(output_tokens), 0)::bigint AS total_output_tokens
+     FROM proxy_stats ${sinceClause}`,
+    params
+  );
+
+  const recent = await pool.query(
+    `SELECT id, trace_id, requested_at, profile, model,
+            input_tokens, output_tokens, saved_tokens, saved_pct
+     FROM proxy_stats
+     ORDER BY requested_at DESC
+     LIMIT 20`
+  );
+
+  const agg = rows[0] || {};
+  return json(res, 200, {
+    aggregate: {
+      totalRequests: agg.total_requests || 0,
+      totalSavedTokens: Number(agg.total_saved_tokens || 0),
+      avgSavedPct: Math.round(Number(agg.avg_saved_pct || 0) * 10) / 10,
+      totalInputTokens: Number(agg.total_input_tokens || 0),
+      totalOutputTokens: Number(agg.total_output_tokens || 0),
+    },
+    recent: recent.rows.map((r) => ({
+      id: Number(r.id),
+      traceId: r.trace_id,
+      requestedAt: r.requested_at,
+      profile: r.profile,
+      model: r.model,
+      inputTokens: r.input_tokens,
+      outputTokens: r.output_tokens,
+      savedTokens: r.saved_tokens,
+      savedPct: r.saved_pct,
+    })),
+  });
+};
+
 // ─── Optimizer handlers ───────────────────────────────────────────────────────
 
 const handleOptimizerAnalyze = async (req, res) => {
@@ -1414,9 +1483,10 @@ const server = createServer(async (req, res) => {
     if (path === "/v1/messages" && req.method === "POST") {
       if (!authedOrLocal(req)) return json(res, 401, { error: "unauthorized" });
       const body = await readBody(req);
-      return handleProxy(req, res, body);
+      return handleProxy(req, res, body, pool);
     }
 
+    if (path === "/proxy/stats" && req.method === "GET") return handleGetProxyStats(req, res);
     if (path === "/optimizer/analyze" && req.method === "POST") return handleOptimizerAnalyze(req, res);
     if (path === "/optimizer/optimize" && req.method === "POST") return handleOptimizerOptimize(req, res);
     if (path === "/optimizer/experiment" && req.method === "POST") return handleOptimizerExperiment(req, res);
