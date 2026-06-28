@@ -84,7 +84,7 @@ degraded.handoff?.split("\n").slice(0, 4).forEach((l) => console.log("    " + l)
 h("TEST 3 — Full Pipeline (balanced)");
 sep();
 
-const result = runPipeline({
+const result = await runPipeline({
   profile: "balanced",
   query: "How do I fix the auth middleware redirect loop?",
   keywords: ["auth", "middleware", "redirect"],
@@ -180,7 +180,7 @@ kv("  Session status",       `${r.layers.sessionGuard.status} (${r.layers.sessio
 h("TEST 4 — Full Pipeline (max-save)");
 sep();
 
-const maxResult = runPipeline({
+const maxResult = await runPipeline({
   ...{
     system: result.system,
     messages: result.messages,

@@ -50,7 +50,7 @@ const charsToTokens = (n) => Math.round(n / 4);
  *   },
  * }}
  */
-export function runPipeline({
+export async function runPipeline({
   system = "",
   messages = [],
   tools = [],
@@ -80,7 +80,7 @@ export function runPipeline({
   // ── Layer 2: Compressor ─────────────────────────────────────
   // Pass routed messages (with contentType) through existing optimizer.
   // applyOptimizations works on content strings — contentType is preserved.
-  const compressed = applyOptimizations(
+  const compressed = await applyOptimizations(
     { system, messages: routedMessages, tools },
     profile
   );

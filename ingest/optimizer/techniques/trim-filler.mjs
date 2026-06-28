@@ -54,6 +54,36 @@ const FILLER_PATTERNS = [
   [/\bPlease let me know if (you need|there is) anything else[.!]?\b/gi, ""],
   [/\bFeel free to ask if you need more (details|information|help)[.!]?\b/gi, ""],
   [/\bI hope this (answers|clarifies|helps)[^.]*[.!]?\b/gi, ""],
+
+  // LLM self-referential filler (Caveman+ patterns)
+  [/\bAs an AI (language model|assistant),?\b/gi, ""],
+  [/\bAs a large language model,?\b/gi, ""],
+  [/\bI('m| am) Claude[,.]?\s*/gi, ""],
+  [/\bIn this (response|answer|explanation),?\b/gi, ""],
+  [/\bIn this context,?\b/gi, ""],
+  [/\bLet me (break this down|explain|clarify|walk you through)[:.]\s*/gi, ""],
+  [/\bTo (answer|address) your (question|request),?\b/gi, ""],
+  [/\bGreat (question|point)[!.]?\s*/gi, ""],
+  [/\bCertainly[!,]?\s*/gi, ""],
+  [/\bSure[!,]?\s*/gi, ""],
+  [/\bOf course[!,]?\s*/gi, ""],
+  [/\bAbsolutely[!,]?\s*/gi, ""],
+  [/\bI('ll| will) (now |)?(help you|assist you)[^.]*[.]\s*/gi, ""],
+  [/\bI understand (that )?(you|your)[^.]*[.]\s*/gi, ""],
+  [/\bThank you for (your question|reaching out|asking)[^.]*[.]\s*/gi, ""],
+
+  // Redundant hedging
+  [/\bIt's worth (noting|mentioning) that\b/gi, "Note:"],
+  [/\bIt's important to (understand|note|remember) that\b/gi, ""],
+  [/\bI (should|want to|need to) (point out|mention) that\b/gi, ""],
+  [/\bJust to be (clear|clarify|safe),?\b/gi, ""],
+  [/\bWith that (said|being said),?\b/gi, ""],
+  [/\bThat (said|being said),?\b/gi, ""],
+  [/\bTo summarize,?\b/gi, "Summary:"],
+  [/\bTo conclude,?\b/gi, ""],
+  [/\bIn summary,?\b/gi, "Summary:"],
+  [/\bIn conclusion,?\b/gi, ""],
+  [/\bTo put it (simply|another way|differently),?\b/gi, ""],
 ];
 
 /**
