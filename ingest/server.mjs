@@ -345,6 +345,11 @@ const ensureSchema = async () => {
       console.warn("pgvector setup skipped:", e.message);
     }
 
+    // scores column on memories — for LLM-as-judge evaluation results
+    await pool.query(
+      `ALTER TABLE memories ADD COLUMN IF NOT EXISTS scores JSONB NOT NULL DEFAULT '{}'::jsonb`
+    );
+
     // Proxy optimization telemetry
     await pool.query(`
       CREATE TABLE IF NOT EXISTS proxy_stats (
@@ -462,7 +467,7 @@ const SUMMARY_DUMP_PATTERNS = [
 ];
 const looksLikeDump = (text) => SUMMARY_DUMP_PATTERNS.some((rx) => rx.test(text));
 
-const callOpenCode = async (transcript) => {
+const callOpenCode = async (transcript, systemPrompt = DISTILL_PROMPT) => {
   if (!OPENCODE_KEY) throw new Error("OPENCODE_GO_API_KEY not set");
   const res = await fetch(`${OPENCODE_BASE}/chat/completions`, {
     method: "POST",
@@ -473,7 +478,7 @@ const callOpenCode = async (transcript) => {
     body: JSON.stringify({
       model: OPENCODE_MODEL,
       messages: [
-        { role: "system", content: DISTILL_PROMPT },
+        { role: "system", content: systemPrompt },
         { role: "user", content: transcript },
       ],
     }),
@@ -1442,7 +1447,7 @@ const handleOptimizerAnalyze = async (req, res) => {
 const handleOptimizerOptimize = async (req, res) => {
   const body = JSON.parse(await readBody(req));
   const { system, messages, tools, profile } = body;
-  const result = applyOptimizations({ system, messages, tools }, profile);
+  const result = await applyOptimizations({ system, messages, tools }, profile);
   return json(res, 200, result);
 };
 
@@ -1458,6 +1463,181 @@ const handleOptimizerPipeline = async (req, res) => {
   const { system, messages, tools, profile, query, keywords, sessionTurns, handoffCtx } = body;
   const result = runPipeline({ system, messages, tools, profile, query, keywords, sessionTurns, handoffCtx });
   return json(res, 200, result);
+};
+
+// ─── Opik-inspired: span waterfall, token timeline, LLM-as-judge ────────────
+
+// Build a depth-first span tree from flat events using parentUuid links.
+function buildSpanTree(events) {
+  const byUuid = new Map();
+  const roots = [];
+
+  for (const e of events) {
+    if (e.uuid) byUuid.set(e.uuid, { ...e, children: [] });
+  }
+  for (const [, span] of byUuid) {
+    const parent = span.parentUuid ? byUuid.get(span.parentUuid) : null;
+    if (parent) parent.children.push(span);
+    else roots.push(span);
+  }
+  return roots;
+}
+
+const handleGetTraceWaterfall = async (req, res, traceId) => {
+  if (!authedOrLocal(req)) return json(res, 401, { error: "unauthorized" });
+  if (!SAFE_ID.test(traceId)) return json(res, 400, { error: "bad traceId" });
+
+  const { rows } = await pool.query(
+    `SELECT raw FROM events WHERE trace_id = $1 ORDER BY id ASC`,
+    [traceId]
+  );
+  if (!rows.length) return json(res, 404, { error: "not found" });
+
+  const events = rows.map((r) => r.raw).filter(
+    (e) => e.type === "transcript.line" && e.uuid
+  );
+
+  // Compute approximate durations from timestamps
+  const ts = (e) => (e.at ? Date.parse(e.at) : 0);
+  const sorted = [...events].sort((a, b) => ts(a) - ts(b));
+  for (let i = 0; i < sorted.length; i++) {
+    const next = sorted[i + 1];
+    sorted[i]._durationMs = next ? ts(next) - ts(sorted[i]) : 0;
+  }
+
+  const spans = sorted.map((e) => ({
+    id: e.uuid,
+    parentId: e.parentUuid || null,
+    role: e.role,
+    kind: e.kind,
+    at: e.at,
+    durationMs: e._durationMs,
+    hasToolUse: e.hasToolUse || false,
+    toolUses: e.toolUses || [],
+    model: e.model || null,
+    usage: e.usage || null,
+    textPreview: typeof e.text === "string" ? e.text.slice(0, 200) : "",
+  }));
+
+  const tree = buildSpanTree(spans);
+  return json(res, 200, { traceId, spans, tree });
+};
+
+const handleGetTraceTokenTimeline = async (req, res, traceId) => {
+  if (!authedOrLocal(req)) return json(res, 401, { error: "unauthorized" });
+  if (!SAFE_ID.test(traceId)) return json(res, 400, { error: "bad traceId" });
+
+  const { rows } = await pool.query(
+    `SELECT raw FROM events WHERE trace_id = $1 ORDER BY id ASC`,
+    [traceId]
+  );
+  if (!rows.length) return json(res, 404, { error: "not found" });
+
+  const turns = [];
+  let cumInput = 0;
+  let cumOutput = 0;
+
+  for (const { raw: e } of rows) {
+    if (e.type !== "transcript.line" || !e.usage) continue;
+    cumInput += e.usage.input_tokens || 0;
+    cumOutput += e.usage.output_tokens || 0;
+    turns.push({
+      at: e.at,
+      uuid: e.uuid,
+      role: e.role,
+      usage: {
+        inputTokens: e.usage.input_tokens || 0,
+        outputTokens: e.usage.output_tokens || 0,
+        cacheReadInputTokens: e.usage.cache_read_input_tokens || 0,
+        cacheCreationInputTokens: e.usage.cache_creation_input_tokens || 0,
+      },
+      cumulativeInputTokens: cumInput,
+      cumulativeOutputTokens: cumOutput,
+      model: e.model || null,
+    });
+  }
+
+  const totalTokens = cumInput + cumOutput;
+  return json(res, 200, { traceId, totalTokens, turns });
+};
+
+// LLM-as-judge hallucination / accuracy scorer.
+// Two prompts matching Opik's metric design: with context and without.
+const JUDGE_WITH_CTX = `You are an expert judge evaluating AI response accuracy.
+Analyze the QUESTION, CONTEXT, and ANSWER below.
+
+Rules:
+1. The ANSWER must not introduce facts beyond what's in the CONTEXT.
+2. The ANSWER must not contradict the CONTEXT.
+3. Minor rephrasings or omissions are acceptable; fabrications are not.
+
+Scoring:
+0.0 — fully faithful to context
+0.5 — partially faithful (some unsupported claims)
+1.0 — entirely hallucinated or contradicts context
+
+Respond ONLY with valid JSON (no markdown, no prose):
+{"score": <float 0.0-1.0>, "reasons": ["reason 1", "reason 2"]}`;
+
+const JUDGE_NO_CTX = `You are an expert judge evaluating AI response accuracy.
+Analyze the QUESTION and ANSWER below based on general knowledge.
+
+Rules:
+1. The ANSWER must not state known falsehoods.
+2. Flag speculative claims presented as facts.
+
+Scoring:
+0.0 — fully accurate
+0.5 — partially accurate (some unsupported claims)
+1.0 — entirely inaccurate or hallucinated
+
+Respond ONLY with valid JSON (no markdown, no prose):
+{"score": <float 0.0-1.0>, "reasons": ["reason 1", "reason 2"]}`;
+
+function extractJsonFromText(text) {
+  const m = text.match(/\{[\s\S]*\}/);
+  if (!m) throw new Error("no JSON found in judge response");
+  return JSON.parse(m[0]);
+}
+
+const handlePostTraceScore = async (req, res, traceId) => {
+  if (!authedOrLocal(req)) return json(res, 401, { error: "unauthorized" });
+  if (!SAFE_ID.test(traceId)) return json(res, 400, { error: "bad traceId" });
+  let body;
+  try {
+    body = JSON.parse(await readBody(req));
+  } catch {
+    return json(res, 400, { error: "invalid json" });
+  }
+
+  const question = typeof body?.question === "string" ? body.question.trim() : "";
+  const answer   = typeof body?.answer   === "string" ? body.answer.trim()   : "";
+  const context  = typeof body?.context  === "string" ? body.context.trim()  : "";
+  if (!question || !answer) return json(res, 400, { error: "question and answer required" });
+
+  const systemPrompt = context ? JUDGE_WITH_CTX : JUDGE_NO_CTX;
+  const userContent = context
+    ? `QUESTION:\n${question}\n\nCONTEXT:\n${context}\n\nANSWER:\n${answer}`
+    : `QUESTION:\n${question}\n\nANSWER:\n${answer}`;
+
+  let judgeResult;
+  try {
+    const { summary } = await callOpenCode(userContent, systemPrompt);
+    judgeResult = extractJsonFromText(summary);
+  } catch (e) {
+    return json(res, 502, { error: "judge_failed", detail: String(e.message) });
+  }
+
+  const score = Math.min(1, Math.max(0, Number(judgeResult.score)));
+  const reasons = Array.isArray(judgeResult.reasons) ? judgeResult.reasons : [String(judgeResult.reasons)];
+
+  return json(res, 200, {
+    traceId,
+    score,
+    reasons,
+    hasContext: Boolean(context),
+    model: OPENCODE_MODEL,
+  });
 };
 
 const server = createServer(async (req, res) => {
@@ -1529,6 +1709,15 @@ const server = createServer(async (req, res) => {
 
     const ms = path.match(/^\/traces\/([^/]+)\/summary$/);
     if (ms && req.method === "GET") return handleGetTraceSummary(req, res, decodeURIComponent(ms[1]));
+
+    const mw = path.match(/^\/traces\/([^/]+)\/waterfall$/);
+    if (mw && req.method === "GET") return handleGetTraceWaterfall(req, res, decodeURIComponent(mw[1]));
+
+    const mtk = path.match(/^\/traces\/([^/]+)\/token-timeline$/);
+    if (mtk && req.method === "GET") return handleGetTraceTokenTimeline(req, res, decodeURIComponent(mtk[1]));
+
+    const msc = path.match(/^\/traces\/([^/]+)\/score$/);
+    if (msc && req.method === "POST") return handlePostTraceScore(req, res, decodeURIComponent(msc[1]));
 
     const me = path.match(/^\/traces\/([^/]+)\/events\/([^/]+)$/);
     if (me && req.method === "GET")

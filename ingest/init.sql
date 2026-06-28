@@ -31,6 +31,7 @@ CREATE TABLE IF NOT EXISTS memories (
   kind          TEXT        NOT NULL DEFAULT 'session_summary',
   summary       TEXT        NOT NULL,
   meta          JSONB       NOT NULL DEFAULT '{}'::jsonb,
+  scores        JSONB       NOT NULL DEFAULT '{}'::jsonb,
   created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS idx_memories_repo_recency ON memories(repo_tag, created_at DESC);
