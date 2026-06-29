@@ -1,7 +1,0 @@
-.env
-.claude/settings.json
-data/
-node_modules/
-memory/target/
-*.log
-.DS_Store
