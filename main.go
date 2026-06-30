@@ -54,7 +54,7 @@ func main() {
 	s := &server{
 		clickhouseURL: strings.TrimRight(env("CLICKHOUSE_URL", "http://localhost:8123"), "/"),
 		httpClient: &http.Client{
-			Timeout: 10 * time.Second,
+			Timeout: 30 * time.Second,
 		},
 	}
 
@@ -66,6 +66,7 @@ func main() {
 	mux.HandleFunc("/", s.handleIndex)
 	mux.HandleFunc("/healthz", s.handleHealth)
 	mux.HandleFunc("/api/hooks", s.handleHooks)
+	mux.HandleFunc("/api/sessions/", s.handleSession)
 
 	addr := ":" + env("PORT", "4000")
 	log.Printf("listening on %s", addr)
@@ -108,6 +109,34 @@ func (s *server) handleHooks(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("allow", "GET, POST")
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"error": "method not allowed"})
 	}
+}
+
+func (s *server) handleSession(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodDelete {
+		w.Header().Set("allow", http.MethodDelete)
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"error": "method not allowed"})
+		return
+	}
+
+	rawID := strings.TrimPrefix(r.URL.EscapedPath(), "/api/sessions/")
+	sessionID, err := url.PathUnescape(rawID)
+	if err != nil || strings.TrimSpace(sessionID) == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "session id is required"})
+		return
+	}
+
+	query := `
+		ALTER TABLE claude_hooks
+		DELETE WHERE session_id = {session_id:String}
+		SETTINGS mutations_sync = 1
+	`
+	params := url.Values{"param_session_id": []string{sessionID}}
+	if err := s.queryWithParams(r.Context(), query, params); err != nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "delete failed", "detail": err.Error()})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "session_id": sessionID})
 }
 
 func (s *server) createHook(w http.ResponseWriter, r *http.Request) {
@@ -249,8 +278,21 @@ func (s *server) query(ctx context.Context, query string, body []byte) error {
 	return err
 }
 
+func (s *server) queryWithParams(ctx context.Context, query string, params url.Values) error {
+	_, err := s.queryBytesWithParams(ctx, query, nil, params)
+	return err
+}
+
 func (s *server) queryBytes(ctx context.Context, query string, body []byte) ([]byte, error) {
-	endpoint := s.clickhouseURL + "/?query=" + url.QueryEscape(strings.TrimSpace(query))
+	return s.queryBytesWithParams(ctx, query, body, nil)
+}
+
+func (s *server) queryBytesWithParams(ctx context.Context, query string, body []byte, params url.Values) ([]byte, error) {
+	if params == nil {
+		params = make(url.Values)
+	}
+	params.Set("query", strings.TrimSpace(query))
+	endpoint := s.clickhouseURL + "/?" + params.Encode()
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
 	if err != nil {
 		return nil, err

@@ -24,10 +24,12 @@ curl -X POST http://localhost:4000/api/hooks \
   -d '{"hook_event_name":"UserPromptSubmit","session_id":"demo-session","session_name":"Demo session"}'
 
 curl http://localhost:4000/api/hooks
+curl -X DELETE http://localhost:4000/api/sessions/demo-session
 curl http://localhost:4000/healthz
 ```
 
 The UI displays event names grouped by session. The API stores the complete hook payload unchanged in ClickHouse.
+Deleting a session from the UI or API permanently removes every hook row with that `session_id`. The delete request waits for the ClickHouse mutation to finish before returning success.
 
 Traceframe uses these fields when present:
 

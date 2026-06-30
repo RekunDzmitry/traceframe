@@ -182,6 +182,35 @@
         font-size: 13px;
       }
 
+      .events-actions {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+      }
+
+      .delete-session {
+        border: 1px solid #d9a19a;
+        border-radius: 8px;
+        background: #fff7f6;
+        color: #a13225;
+        cursor: pointer;
+        font: inherit;
+        font-size: 13px;
+        font-weight: 750;
+        min-height: 36px;
+        padding: 0 12px;
+      }
+
+      .delete-session:hover {
+        background: #fde8e5;
+        border-color: #bd5b4f;
+      }
+
+      .delete-session:disabled {
+        cursor: wait;
+        opacity: 0.6;
+      }
+
       .hook-list {
         list-style: none;
         margin: 0;
@@ -245,6 +274,16 @@
           position: static;
         }
 
+        .events-header {
+          align-items: flex-start;
+          flex-direction: column;
+        }
+
+        .events-actions {
+          justify-content: space-between;
+          width: 100%;
+        }
+
         .hook {
           grid-template-columns: 1fr;
           gap: 8px;
@@ -275,7 +314,12 @@
         <section class="panel events" aria-label="Hook events">
           <div class="events-header">
             <div class="events-title" id="events-title">All sessions</div>
-            <div class="status" id="status">Loading hooks...</div>
+            <div class="events-actions">
+              <div class="status" id="status">Loading hooks...</div>
+              <button class="delete-session" type="button" id="delete-session" hidden>
+                Delete session
+              </button>
+            </div>
           </div>
           <ul class="hook-list" id="hooks"></ul>
           <div class="empty" id="empty" hidden>No hook events yet.</div>
@@ -295,8 +339,10 @@
       const emptyEl = document.querySelector("#empty");
       const titleEl = document.querySelector("#events-title");
       const refreshEl = document.querySelector("#refresh");
+      const deleteEl = document.querySelector("#delete-session");
 
       refreshEl.addEventListener("click", loadHooks);
+      deleteEl.addEventListener("click", deleteSelectedSession);
       loadHooks();
       setInterval(loadHooks, 5000);
 
@@ -421,6 +467,7 @@
           state.selectedSession === "all"
             ? "All sessions"
             : selected?.name || "Session";
+        deleteEl.hidden = state.selectedSession === "all" || !selected;
         emptyEl.hidden = visible.length > 0;
 
         for (const hook of visible) {
@@ -446,6 +493,45 @@
           body.append(name, session);
           item.append(body, time);
           hooksEl.appendChild(item);
+        }
+      }
+
+      async function deleteSelectedSession() {
+        const sessions = buildSessions(state.hooks);
+        const session = sessions.find(
+          (item) => item.id === state.selectedSession,
+        );
+        if (!session) {
+          return;
+        }
+
+        const confirmed = window.confirm(
+          `Delete ${session.name} and all ${session.count} hook event${
+            session.count === 1 ? "" : "s"
+          }? This cannot be undone.`,
+        );
+        if (!confirmed) {
+          return;
+        }
+
+        deleteEl.disabled = true;
+        statusEl.textContent = "Deleting session...";
+        try {
+          const response = await fetch(
+            `/api/sessions/${encodeURIComponent(session.id)}`,
+            { method: "DELETE" },
+          );
+          if (!response.ok) {
+            const body = await response.json().catch(() => ({}));
+            throw new Error(body.detail || body.error || `HTTP ${response.status}`);
+          }
+
+          state.selectedSession = "all";
+          await loadHooks();
+        } catch (error) {
+          statusEl.textContent = `Delete failed: ${error.message}`;
+        } finally {
+          deleteEl.disabled = false;
         }
       }
 
