@@ -1,0 +1,213 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Traceframe Hooks</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f7f8fa;
+        --panel: #ffffff;
+        --text: #16181d;
+        --muted: #667085;
+        --line: #d8dde6;
+        --accent: #126c67;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        background: var(--bg);
+        color: var(--text);
+        font-family:
+          Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+          "Segoe UI", sans-serif;
+      }
+
+      main {
+        width: min(880px, calc(100vw - 32px));
+        margin: 0 auto;
+        padding: 32px 0;
+      }
+
+      header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+        margin-bottom: 18px;
+      }
+
+      h1 {
+        margin: 0;
+        font-size: 24px;
+        font-weight: 650;
+        letter-spacing: 0;
+      }
+
+      .status {
+        color: var(--muted);
+        font-size: 14px;
+      }
+
+      button {
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        background: var(--panel);
+        color: var(--text);
+        font: inherit;
+        font-size: 14px;
+        padding: 8px 12px;
+        cursor: pointer;
+      }
+
+      button:hover {
+        border-color: var(--accent);
+      }
+
+      .panel {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        overflow: hidden;
+      }
+
+      .row {
+        display: grid;
+        grid-template-columns: minmax(180px, 1fr) minmax(160px, auto);
+        gap: 16px;
+        padding: 14px 16px;
+        border-top: 1px solid var(--line);
+      }
+
+      .row:first-child {
+        border-top: 0;
+      }
+
+      .name {
+        font-weight: 620;
+      }
+
+      .time {
+        color: var(--muted);
+        font-size: 13px;
+        text-align: right;
+        white-space: nowrap;
+      }
+
+      .empty,
+      .error {
+        padding: 28px 16px;
+        color: var(--muted);
+      }
+
+      .error {
+        color: #9f2d20;
+      }
+
+      @media (max-width: 560px) {
+        main {
+          width: min(100vw - 24px, 880px);
+          padding-top: 20px;
+        }
+
+        header {
+          align-items: flex-start;
+          flex-direction: column;
+        }
+
+        .row {
+          grid-template-columns: 1fr;
+          gap: 6px;
+        }
+
+        .time {
+          text-align: left;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header>
+        <div>
+          <h1>Claude Code Hooks</h1>
+          <div class="status" id="status">Loading hooks...</div>
+        </div>
+        <button id="refresh" type="button">Refresh</button>
+      </header>
+
+      <section class="panel" id="hooks">
+        <div class="empty">No hook events yet.</div>
+      </section>
+    </main>
+
+    <script>
+      const hooksEl = document.querySelector("#hooks");
+      const statusEl = document.querySelector("#status");
+      const refreshEl = document.querySelector("#refresh");
+
+      function formatTime(value) {
+        const date = new Date(value);
+        if (Number.isNaN(date.getTime())) return "";
+        return date.toLocaleString();
+      }
+
+      function render(hooks) {
+        if (!hooks.length) {
+          hooksEl.innerHTML = '<div class="empty">No hook events yet.</div>';
+          statusEl.textContent = "Waiting for Claude Code hook events.";
+          return;
+        }
+
+        hooksEl.innerHTML = hooks
+          .map(
+            (hook) => `
+              <div class="row">
+                <div class="name">${escapeHTML(hook.event_name || "Unknown")}</div>
+                <div class="time">${escapeHTML(formatTime(hook.event_time))}</div>
+              </div>
+            `,
+          )
+          .join("");
+        statusEl.textContent = `${hooks.length} recent event${hooks.length === 1 ? "" : "s"}`;
+      }
+
+      function escapeHTML(value) {
+        return String(value).replace(/[&<>"']/g, (ch) => {
+          return {
+            "&": "&amp;",
+            "<": "&lt;",
+            ">": "&gt;",
+            '"': "&quot;",
+            "'": "&#39;",
+          }[ch];
+        });
+      }
+
+      async function loadHooks() {
+        refreshEl.disabled = true;
+        try {
+          const response = await fetch("/api/hooks?limit=100");
+          if (!response.ok) throw new Error(`HTTP ${response.status}`);
+          const data = await response.json();
+          render(data.hooks || []);
+        } catch (error) {
+          hooksEl.innerHTML = `<div class="error">Failed to load hooks: ${escapeHTML(error.message)}</div>`;
+          statusEl.textContent = "ClickHouse or API is unavailable.";
+        } finally {
+          refreshEl.disabled = false;
+        }
+      }
+
+      refreshEl.addEventListener("click", loadHooks);
+      loadHooks();
+      setInterval(loadHooks, 5000);
+    </script>
+  </body>
+</html>
