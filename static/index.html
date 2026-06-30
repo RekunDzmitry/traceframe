@@ -7,12 +7,14 @@
     <style>
       :root {
         color-scheme: light;
-        --bg: #f7f8fa;
+        --bg: #f7f7f4;
         --panel: #ffffff;
-        --text: #16181d;
-        --muted: #667085;
-        --line: #d8dde6;
-        --accent: #126c67;
+        --border: #d9d8d1;
+        --text: #202124;
+        --muted: #6b6f76;
+        --accent: #0f766e;
+        --accent-soft: #d8f3ee;
+        --shadow: 0 10px 30px rgba(32, 33, 36, 0.08);
       }
 
       * {
@@ -27,107 +29,229 @@
         font-family:
           Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
           "Segoe UI", sans-serif;
+        letter-spacing: 0;
       }
 
       main {
-        width: min(880px, calc(100vw - 32px));
+        width: min(1120px, calc(100% - 32px));
         margin: 0 auto;
         padding: 32px 0;
       }
 
       header {
         display: flex;
-        align-items: center;
+        align-items: flex-end;
         justify-content: space-between;
         gap: 16px;
-        margin-bottom: 18px;
+        margin-bottom: 22px;
       }
 
       h1 {
         margin: 0;
-        font-size: 24px;
-        font-weight: 650;
-        letter-spacing: 0;
+        font-size: clamp(28px, 4vw, 42px);
+        line-height: 1;
       }
 
-      .status {
+      .subtitle {
+        margin: 8px 0 0;
         color: var(--muted);
-        font-size: 14px;
       }
 
-      button {
-        border: 1px solid var(--line);
-        border-radius: 6px;
+      .refresh {
+        border: 1px solid var(--border);
+        border-radius: 8px;
         background: var(--panel);
         color: var(--text);
-        font: inherit;
-        font-size: 14px;
-        padding: 8px 12px;
         cursor: pointer;
+        font: inherit;
+        font-weight: 650;
+        min-height: 40px;
+        padding: 0 14px;
+        box-shadow: var(--shadow);
       }
 
-      button:hover {
+      .refresh:hover {
         border-color: var(--accent);
+      }
+
+      .layout {
+        display: grid;
+        grid-template-columns: 290px minmax(0, 1fr);
+        gap: 18px;
+        align-items: start;
       }
 
       .panel {
         background: var(--panel);
-        border: 1px solid var(--line);
+        border: 1px solid var(--border);
         border-radius: 8px;
-        overflow: hidden;
+        box-shadow: var(--shadow);
       }
 
-      .row {
-        display: grid;
-        grid-template-columns: minmax(180px, 1fr) minmax(160px, auto);
-        gap: 16px;
-        padding: 14px 16px;
-        border-top: 1px solid var(--line);
+      .sessions {
+        padding: 12px;
+        position: sticky;
+        top: 16px;
       }
 
-      .row:first-child {
-        border-top: 0;
-      }
-
-      .name {
-        font-weight: 620;
-      }
-
-      .time {
+      .section-title {
+        margin: 4px 4px 10px;
         color: var(--muted);
-        font-size: 13px;
-        text-align: right;
+        font-size: 12px;
+        font-weight: 800;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      .session-list {
+        display: grid;
+        gap: 6px;
+      }
+
+      .session-button {
+        width: 100%;
+        border: 1px solid transparent;
+        border-radius: 8px;
+        background: transparent;
+        cursor: pointer;
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 8px;
+        min-height: 54px;
+        padding: 9px 10px;
+        text-align: left;
+      }
+
+      .session-button:hover {
+        background: #f4f7f6;
+      }
+
+      .session-button.active {
+        background: var(--accent-soft);
+        border-color: #8bd4ca;
+      }
+
+      .session-name {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font-weight: 750;
+      }
+
+      .session-meta {
+        color: var(--muted);
+        font-size: 12px;
+        margin-top: 3px;
+        overflow: hidden;
+        text-overflow: ellipsis;
         white-space: nowrap;
       }
 
-      .empty,
-      .error {
-        padding: 28px 16px;
+      .count {
+        align-self: center;
+        border-radius: 999px;
+        background: #e7e6df;
+        color: #3f4247;
+        font-size: 12px;
+        font-weight: 800;
+        min-width: 28px;
+        padding: 4px 8px;
+        text-align: center;
+      }
+
+      .events {
+        min-height: 420px;
+      }
+
+      .events-header {
+        border-bottom: 1px solid var(--border);
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 16px 18px;
+      }
+
+      .events-title {
+        font-size: 18px;
+        font-weight: 800;
+      }
+
+      .status {
         color: var(--muted);
+        font-size: 13px;
       }
 
-      .error {
-        color: #9f2d20;
+      .hook-list {
+        list-style: none;
+        margin: 0;
+        padding: 0;
       }
 
-      @media (max-width: 560px) {
+      .hook {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 16px;
+        min-height: 72px;
+        padding: 14px 18px;
+        border-bottom: 1px solid var(--border);
+      }
+
+      .hook:last-child {
+        border-bottom: 0;
+      }
+
+      .event-name {
+        font-size: 16px;
+        font-weight: 800;
+        overflow-wrap: anywhere;
+      }
+
+      .event-session {
+        color: var(--muted);
+        font-size: 13px;
+        margin-top: 6px;
+        overflow-wrap: anywhere;
+      }
+
+      .event-time {
+        color: var(--muted);
+        font-size: 13px;
+        white-space: nowrap;
+      }
+
+      .empty {
+        color: var(--muted);
+        padding: 48px 18px;
+        text-align: center;
+      }
+
+      @media (max-width: 760px) {
         main {
-          width: min(100vw - 24px, 880px);
-          padding-top: 20px;
+          width: min(100% - 20px, 1120px);
+          padding: 18px 0;
         }
 
         header {
-          align-items: flex-start;
+          align-items: stretch;
           flex-direction: column;
         }
 
-        .row {
+        .layout {
           grid-template-columns: 1fr;
-          gap: 6px;
         }
 
-        .time {
-          text-align: left;
+        .sessions {
+          position: static;
+        }
+
+        .hook {
+          grid-template-columns: 1fr;
+          gap: 8px;
+        }
+
+        .event-time {
+          white-space: normal;
         }
       }
     </style>
@@ -136,78 +260,211 @@
     <main>
       <header>
         <div>
-          <h1>Claude Code Hooks</h1>
-          <div class="status" id="status">Loading hooks...</div>
+          <h1>Traceframe Hooks</h1>
+          <p class="subtitle">Hook events grouped by coding session.</p>
         </div>
-        <button id="refresh" type="button">Refresh</button>
+        <button class="refresh" type="button" id="refresh">Refresh</button>
       </header>
 
-      <section class="panel" id="hooks">
-        <div class="empty">No hook events yet.</div>
+      <section class="layout">
+        <aside class="panel sessions" aria-label="Sessions">
+          <div class="section-title">Sessions</div>
+          <div class="session-list" id="sessions"></div>
+        </aside>
+
+        <section class="panel events" aria-label="Hook events">
+          <div class="events-header">
+            <div class="events-title" id="events-title">All sessions</div>
+            <div class="status" id="status">Loading hooks...</div>
+          </div>
+          <ul class="hook-list" id="hooks"></ul>
+          <div class="empty" id="empty" hidden>No hook events yet.</div>
+        </section>
       </section>
     </main>
 
     <script>
+      const state = {
+        hooks: [],
+        selectedSession: "all",
+      };
+
+      const sessionsEl = document.querySelector("#sessions");
       const hooksEl = document.querySelector("#hooks");
       const statusEl = document.querySelector("#status");
+      const emptyEl = document.querySelector("#empty");
+      const titleEl = document.querySelector("#events-title");
       const refreshEl = document.querySelector("#refresh");
-
-      function formatTime(value) {
-        const date = new Date(value);
-        if (Number.isNaN(date.getTime())) return "";
-        return date.toLocaleString();
-      }
-
-      function render(hooks) {
-        if (!hooks.length) {
-          hooksEl.innerHTML = '<div class="empty">No hook events yet.</div>';
-          statusEl.textContent = "Waiting for Claude Code hook events.";
-          return;
-        }
-
-        hooksEl.innerHTML = hooks
-          .map(
-            (hook) => `
-              <div class="row">
-                <div class="name">${escapeHTML(hook.event_name || "Unknown")}</div>
-                <div class="time">${escapeHTML(formatTime(hook.event_time))}</div>
-              </div>
-            `,
-          )
-          .join("");
-        statusEl.textContent = `${hooks.length} recent event${hooks.length === 1 ? "" : "s"}`;
-      }
-
-      function escapeHTML(value) {
-        return String(value).replace(/[&<>"']/g, (ch) => {
-          return {
-            "&": "&amp;",
-            "<": "&lt;",
-            ">": "&gt;",
-            '"': "&quot;",
-            "'": "&#39;",
-          }[ch];
-        });
-      }
-
-      async function loadHooks() {
-        refreshEl.disabled = true;
-        try {
-          const response = await fetch("/api/hooks?limit=100");
-          if (!response.ok) throw new Error(`HTTP ${response.status}`);
-          const data = await response.json();
-          render(data.hooks || []);
-        } catch (error) {
-          hooksEl.innerHTML = `<div class="error">Failed to load hooks: ${escapeHTML(error.message)}</div>`;
-          statusEl.textContent = "ClickHouse or API is unavailable.";
-        } finally {
-          refreshEl.disabled = false;
-        }
-      }
 
       refreshEl.addEventListener("click", loadHooks);
       loadHooks();
       setInterval(loadHooks, 5000);
+
+      async function loadHooks() {
+        statusEl.textContent = "Loading hooks...";
+        try {
+          const response = await fetch("/api/hooks?limit=300");
+          if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+          }
+          const data = await response.json();
+          state.hooks = Array.isArray(data.hooks) ? data.hooks : [];
+          render();
+          statusEl.textContent = `${state.hooks.length} events`;
+        } catch (error) {
+          statusEl.textContent = `Failed to load: ${error.message}`;
+        }
+      }
+
+      function render() {
+        const sessions = buildSessions(state.hooks);
+        if (
+          state.selectedSession !== "all" &&
+          !sessions.some((session) => session.id === state.selectedSession)
+        ) {
+          state.selectedSession = "all";
+        }
+
+        renderSessions(sessions);
+        renderHooks(sessions);
+      }
+
+      function buildSessions(hooks) {
+        const sessions = new Map();
+        for (const hook of hooks) {
+          const id = hook.session_id || "unknown";
+          const fallbackName = id === "unknown" ? "Unknown session" : id;
+          const name = hook.session_name || fallbackName;
+          const existing = sessions.get(id);
+          if (existing) {
+            existing.count += 1;
+            existing.lastEvent = existing.lastEvent || hook.event_time;
+            continue;
+          }
+          sessions.set(id, {
+            id,
+            name,
+            count: 1,
+            lastEvent: hook.event_time,
+          });
+        }
+        return [...sessions.values()].sort((a, b) =>
+          String(b.lastEvent).localeCompare(String(a.lastEvent)),
+        );
+      }
+
+      function renderSessions(sessions) {
+        sessionsEl.textContent = "";
+        sessionsEl.appendChild(
+          sessionButton({
+            id: "all",
+            name: "All sessions",
+            count: state.hooks.length,
+            meta: `${sessions.length} sessions`,
+          }),
+        );
+
+        for (const session of sessions) {
+          sessionsEl.appendChild(
+            sessionButton({
+              id: session.id,
+              name: session.name,
+              count: session.count,
+              meta: session.id === session.name ? "Session id" : session.id,
+            }),
+          );
+        }
+      }
+
+      function sessionButton(session) {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className =
+          "session-button" +
+          (state.selectedSession === session.id ? " active" : "");
+        button.addEventListener("click", () => {
+          state.selectedSession = session.id;
+          render();
+        });
+
+        const label = document.createElement("div");
+        const name = document.createElement("div");
+        name.className = "session-name";
+        name.textContent = session.name;
+
+        const meta = document.createElement("div");
+        meta.className = "session-meta";
+        meta.textContent = session.meta;
+
+        const count = document.createElement("div");
+        count.className = "count";
+        count.textContent = session.count;
+
+        label.append(name, meta);
+        button.append(label, count);
+        return button;
+      }
+
+      function renderHooks(sessions) {
+        hooksEl.textContent = "";
+        const selected = sessions.find(
+          (session) => session.id === state.selectedSession,
+        );
+        const visible =
+          state.selectedSession === "all"
+            ? state.hooks
+            : state.hooks.filter(
+                (hook) => (hook.session_id || "unknown") === state.selectedSession,
+              );
+
+        titleEl.textContent =
+          state.selectedSession === "all"
+            ? "All sessions"
+            : selected?.name || "Session";
+        emptyEl.hidden = visible.length > 0;
+
+        for (const hook of visible) {
+          const item = document.createElement("li");
+          item.className = "hook";
+
+          const body = document.createElement("div");
+          const name = document.createElement("div");
+          name.className = "event-name";
+          name.textContent = hook.event_name || "Unknown";
+
+          const session = document.createElement("div");
+          session.className = "event-session";
+          session.textContent = `${hook.session_name || "Unknown session"} · ${
+            hook.session_id || "unknown"
+          }`;
+
+          const time = document.createElement("time");
+          time.className = "event-time";
+          time.dateTime = hook.event_time || "";
+          time.textContent = formatTime(hook.event_time);
+
+          body.append(name, session);
+          item.append(body, time);
+          hooksEl.appendChild(item);
+        }
+      }
+
+      function formatTime(value) {
+        if (!value) {
+          return "";
+        }
+        const date = new Date(value);
+        if (Number.isNaN(date.getTime())) {
+          return value;
+        }
+        return new Intl.DateTimeFormat(undefined, {
+          month: "short",
+          day: "numeric",
+          hour: "2-digit",
+          minute: "2-digit",
+          second: "2-digit",
+        }).format(date);
+      }
     </script>
   </body>
 </html>
