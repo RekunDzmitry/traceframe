@@ -1363,10 +1363,24 @@
           row.classList.add(ev.status || "ok");
         }
         if (!passesFilter) row.classList.add("dimmed");
+        // Restore expanded state on every render so the 5s refresh doesn't
+        // collapse rows the user has open.
+        const isOpen = state.expanded.has(ev.event_id);
+        if (isOpen) row.classList.add("expanded");
+        row.setAttribute("aria-expanded", isOpen ? "true" : "false");
+        row.setAttribute("role", "button");
+        row.setAttribute("tabindex", "0");
 
         row.addEventListener("click", (e) => {
           if (e.target.closest(".btn")) return;
           toggleExpand(ev.event_id);
+        });
+        row.addEventListener("keydown", (e) => {
+          if (e.target.closest(".btn")) return;
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            toggleExpand(ev.event_id);
+          }
         });
 
         const icon = document.createElement("span");
@@ -1490,6 +1504,7 @@
           const willExpand = state.expanded.has(eventId);
           next.hidden = !willExpand;
           row.classList.toggle("expanded", willExpand);
+          row.setAttribute("aria-expanded", willExpand ? "true" : "false");
         }
       }
 
