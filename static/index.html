@@ -1359,9 +1359,6 @@
         const row = document.createElement("li");
         row.className = "row";
         row.dataset.eventId = ev.event_id;
-        const isExpanded = state.expanded.has(ev.event_id);
-        row.classList.toggle("expanded", isExpanded);
-        row.setAttribute("aria-expanded", String(isExpanded));
         if (ev.kind === "tool") {
           row.classList.add(ev.status || "ok");
         }
@@ -1493,7 +1490,6 @@
           const willExpand = state.expanded.has(eventId);
           next.hidden = !willExpand;
           row.classList.toggle("expanded", willExpand);
-          row.setAttribute("aria-expanded", String(willExpand));
         }
       }
 
