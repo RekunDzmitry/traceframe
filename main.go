@@ -376,8 +376,15 @@ func (s *server) createHook(w http.ResponseWriter, r *http.Request) {
 	sessionID := sessionIdentifier(payload)
 	sessionName := sessionLabel(payload, sessionID)
 	toolUseID := firstString(payload, "tool_use_id", "toolUseId")
-	naturalID := computeNaturalID(sessionID, eventName, toolUseID)
-	row := map[string]string{
+	// Pin event_time in Go so the natural_id (which is hashed over it)
+	// matches the value the database actually stores. The schema default
+	// is now64(3) on the server clock; if we let it default and compute
+	// the hash from time.Now(), the two can drift by a few ms and the
+	// stored natural_id won't match what computeNaturalID would predict.
+	eventTime := time.Now().UTC()
+	naturalID := computeNaturalID(sessionID, eventName, toolUseID, eventTime)
+	row := map[string]any{
+		"event_time":       eventTime.Format("2006-01-02 15:04:05.000"),
 		"event_name":       eventName,
 		"session_id":       sessionID,
 		"session_name":     sessionName,
@@ -389,7 +396,7 @@ func (s *server) createHook(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "encode row"})
 		return
 	}
-	query := "INSERT INTO claude_hooks (event_name, session_id, session_name, event_natural_id, payload) FORMAT JSONEachRow"
+	query := "INSERT INTO claude_hooks (event_time, event_name, session_id, session_name, event_natural_id, payload) FORMAT JSONEachRow"
 	if err := s.query(r.Context(), query, append(rowJSON, '\n')); err != nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "insert failed", "detail": err.Error()})
 		return
@@ -455,10 +462,15 @@ func (s *server) ensureSchema(ctx context.Context) error {
 // generateUUIDv4(), ClickHouse re-randomizes the UUID at read time, so a
 // predicate on event_id would never match the row we just SELECTed. The
 // WHERE clause must use the column being mutated.
+//
+// The hash includes event_time (as a millisecond integer) so the natural_id
+// is one-per-row, not one-per-(session,name,tool_use_id). The formula must
+// stay byte-for-byte identical to computeNaturalID in Go.
+//
+// The query is a single line — multi-line variants trip the ClickHouse
+// parser (the `(` count gets miscounted past the newlines).
 func (s *server) backfillNaturalIDs(ctx context.Context) error {
-	query := `ALTER TABLE claude_hooks UPDATE event_natural_id = ` +
-		`concat('legacy-', substring(lower(hex(SHA256(concat(session_id, '|', event_name, '|', JSONExtractString(payload, 'tool_use_id'))))), 1, 24)) ` +
-		`WHERE event_natural_id = '' SETTINGS mutations_sync = 1`
+	query := `ALTER TABLE claude_hooks UPDATE event_natural_id = concat('legacy-', substring(lower(hex(SHA256(concat(session_id, '|', event_name, '|', JSONExtractString(payload, 'tool_use_id'), '|', toString(toUnixTimestamp64Milli(event_time)))))), 1, 24)) WHERE event_natural_id = '' SETTINGS mutations_sync = 1`
 	if err := s.queryWithParams(ctx, query, nil); err != nil {
 		return err
 	}
@@ -1573,19 +1585,29 @@ func patchStats(response map[string]any) (add, rem int, ok bool) {
 
 // fallbackEventID generates a stable identifier for rows that don't yet
 // have a UUID (e.g. rows inserted before the event_id column existed).
-// computeNaturalID returns the deterministic natural identifier for a row,
-// derived from the natural key (session_id, event_name, tool_use_id). The
-// event_time is intentionally excluded so the ID is stable across parts
-// that haven't been merged and across re-inserts.
-func computeNaturalID(sessionID, eventName, toolUseID string) string {
-	h := sha256.Sum256([]byte(strings.Join([]string{sessionID, eventName, toolUseID}, "|")))
+// computeNaturalID returns the deterministic natural identifier for a row.
+// It hashes (session_id, event_name, tool_use_id, event_time) so that
+// repeated same-name events within a session (e.g. multiple UserPromptSubmit
+// or Stop rows) get distinct IDs — the public ID is one-per-row, not
+// one-per-natural-key. event_time is DateTime64(3) DEFAULT now64(3),
+// materialized at insert and stable across re-reads/merges, so the
+// natural_id is also stable. The same formula is mirrored in the
+// backfill mutation (main.go:backfillNaturalIDs) — keep the two in sync.
+func computeNaturalID(sessionID, eventName, toolUseID string, eventTime time.Time) string {
+	parts := []string{
+		sessionID,
+		eventName,
+		toolUseID,
+		strconv.FormatInt(eventTime.UnixMilli(), 10),
+	}
+	h := sha256.Sum256([]byte(strings.Join(parts, "|")))
 	return "legacy-" + hex.EncodeToString(h[:12])
 }
 
-// The resulting ID is deterministic for the same natural key, so the UI
-// can round-trip through it.
+// The resulting ID is deterministic for the same natural key + time, so
+// the UI can round-trip through it.
 func fallbackEventID(e *hookEvent) string {
-	return computeNaturalID(e.SessionID, e.EventName, e.ToolUseID)
+	return computeNaturalID(e.SessionID, e.EventName, e.ToolUseID, e.EventTime)
 }
 
 // classifyEvent maps the raw event_name to a normalized kind.

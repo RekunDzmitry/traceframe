@@ -557,8 +557,8 @@ func TestReadOneLinerLineRangeOffset(t *testing.T) {
 }
 
 // Issue 3: the natural ID is deterministic for a given (session, event_name,
-// tool_use_id) triple, so legacy rows whose UUIDs are re-randomized on every
-// read can still be looked up by the natural ID.
+// tool_use_id, event_time) tuple, so legacy rows whose UUIDs were
+// re-randomized on every read can still be looked up by the natural ID.
 func TestNaturalIDIsStable(t *testing.T) {
 	now := time.Date(2026, 6, 30, 10, 0, 0, 0, time.UTC)
 	a := &hookEvent{SessionID: "s1", EventTime: now, EventName: "PreToolUse", ToolUseID: "tu-1"}
@@ -570,20 +570,54 @@ func TestNaturalIDIsStable(t *testing.T) {
 	if fallbackEventID(a) == fallbackEventID(c) {
 		t.Error("natural ID should differ when tool_use_id differs")
 	}
-	if fallbackEventID(a) != computeNaturalID("s1", "PreToolUse", "tu-1") {
+	if fallbackEventID(a) != computeNaturalID("s1", "PreToolUse", "tu-1", now) {
 		t.Error("fallbackEventID should defer to computeNaturalID")
 	}
 }
 
-// The natural ID must not include event_time, so a row whose event_time
-// drifts across re-inserts still resolves to the same ID.
-func TestNaturalIDExcludesEventTime(t *testing.T) {
+// The natural ID must include event_time so repeated same-name events in
+// the same session (e.g. multiple UserPromptSubmit or Stop rows) get
+// distinct IDs and the public ID stays one-per-row. Without event_time
+// the formula would collapse every prompt in a session to one ID, which
+// breaks expansion isolation and the raw drawer.
+func TestNaturalIDIncludesEventTime(t *testing.T) {
 	t1 := time.Date(2026, 6, 30, 10, 0, 0, 0, time.UTC)
 	t2 := time.Date(2026, 6, 30, 10, 0, 1, 0, time.UTC)
-	a := &hookEvent{SessionID: "s1", EventTime: t1, EventName: "PreToolUse", ToolUseID: "tu-1"}
-	b := &hookEvent{SessionID: "s1", EventTime: t2, EventName: "PreToolUse", ToolUseID: "tu-1"}
-	if fallbackEventID(a) != fallbackEventID(b) {
-		t.Error("natural ID should not depend on event_time")
+	a := &hookEvent{SessionID: "s1", EventTime: t1, EventName: "UserPromptSubmit", ToolUseID: ""}
+	b := &hookEvent{SessionID: "s1", EventTime: t2, EventName: "UserPromptSubmit", ToolUseID: ""}
+	if fallbackEventID(a) == fallbackEventID(b) {
+		t.Error("natural ID should differ when event_time differs (otherwise all prompts in a session collide)")
+	}
+}
+
+// Two prompts in the same session with the same event_name and an empty
+// tool_use_id must get distinct natural_ids. This is the regression for
+// the prompt-collision bug: a multi-turn session has N UserPromptSubmit
+// rows and N Stop rows, and without event_time in the hash they all
+// collapsed to a single shared ID, which broke expansion isolation
+// (clicking one prompt expanded all prompts) and the raw drawer
+// (the detail endpoint returned an arbitrary colliding row's payload).
+func TestPromptsAndStopsAreUnique(t *testing.T) {
+	now := time.Date(2026, 7, 1, 14, 5, 14, 0, time.UTC)
+	session := "380d58d3-9774-4994-b7ee-afdfd4c4af9a"
+	rows := []*hookEvent{
+		{SessionID: session, EventTime: now.Add(0 * time.Millisecond), EventName: "UserPromptSubmit", ToolUseID: ""},
+		{SessionID: session, EventTime: now.Add(1 * time.Second), EventName: "UserPromptSubmit", ToolUseID: ""},
+		{SessionID: session, EventTime: now.Add(2 * time.Second), EventName: "UserPromptSubmit", ToolUseID: ""},
+		{SessionID: session, EventTime: now.Add(3 * time.Second), EventName: "Stop", ToolUseID: ""},
+		{SessionID: session, EventTime: now.Add(4 * time.Second), EventName: "Stop", ToolUseID: ""},
+	}
+	ids := make(map[string]int)
+	for _, r := range rows {
+		ids[fallbackEventID(r)]++
+	}
+	for id, n := range ids {
+		if n > 1 {
+			t.Errorf("natural_id %q appeared in %d rows (expected 1 per row)", id, n)
+		}
+	}
+	if len(ids) != len(rows) {
+		t.Errorf("expected %d distinct natural_ids, got %d", len(rows), len(ids))
 	}
 }
 
@@ -610,29 +644,30 @@ func TestHookRowUsesNaturalID(t *testing.T) {
 }
 
 // The SQL backfill formula must produce the same natural ID as
-// computeNaturalID for the same (session_id, event_name, tool_use_id)
-// triple. ClickHouse's SHA-256 is byte-compatible with Go's crypto/sha256,
-// so we replicate the formula in Go and check the prefix and shape.
+// computeNaturalID for the same natural key + event_time. ClickHouse's
+// SHA-256 is byte-compatible with Go's crypto/sha256, so we replicate
+// the formula in Go and check the prefix and shape.
 func TestBackfillSQLFormulaMatchesGo(t *testing.T) {
 	cases := []struct {
 		sessionID, eventName, toolUseID string
+		at                              time.Time
 	}{
-		{"s1", "PreToolUse", "tu-1"},
-		{"s1", "PostToolUse", ""},
-		{"380d58d3-9774-4994-b7ee-afdfd4c4af9a", "Stop", ""},
-		{"long-session-id-with-dashes-and-stuff", "PreToolUse", "tool_use_id_1234"},
+		{"s1", "PreToolUse", "tu-1", time.Date(2026, 6, 30, 10, 0, 0, 0, time.UTC)},
+		{"s1", "PostToolUse", "", time.Date(2026, 6, 30, 10, 0, 1, 500_000_000, time.UTC)},
+		{"380d58d3-9774-4994-b7ee-afdfd4c4af9a", "Stop", "", time.Date(2026, 7, 1, 12, 0, 0, 0, time.UTC)},
+		{"long-session-id-with-dashes-and-stuff", "PreToolUse", "tool_use_id_1234", time.Unix(1700000000, 0).UTC()},
 	}
 	for _, c := range cases {
-		got := computeNaturalID(c.sessionID, c.eventName, c.toolUseID)
+		got := computeNaturalID(c.sessionID, c.eventName, c.toolUseID, c.at)
 		if !strings.HasPrefix(got, "legacy-") {
-			t.Errorf("computeNaturalID(%q) = %q, missing 'legacy-' prefix", c, got)
+			t.Errorf("computeNaturalID = %q, missing 'legacy-' prefix", got)
 		}
 		if len(got) != len("legacy-")+24 {
-			t.Errorf("computeNaturalID(%q) = %q, want 24 hex chars after prefix", c, got)
+			t.Errorf("computeNaturalID = %q, want 24 hex chars after prefix", got)
 		}
 		for _, r := range got[len("legacy-"):] {
 			if !((r >= '0' && r <= '9') || (r >= 'a' && r <= 'f')) {
-				t.Errorf("computeNaturalID(%q) = %q, contains non-lowercase-hex char %q", c, got, r)
+				t.Errorf("computeNaturalID = %q, contains non-lowercase-hex char %q", got, r)
 			}
 		}
 	}
