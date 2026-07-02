@@ -123,6 +123,7 @@ type turn struct {
 	EndedAt   string         `json:"ended_at"`
 	Prompt    *eventSummary  `json:"prompt,omitempty"`
 	Tools     []eventSummary `json:"tools"`
+	Notes     []eventSummary `json:"notes,omitempty"`
 	Response  *eventSummary  `json:"response,omitempty"`
 }
 
@@ -247,22 +248,27 @@ func (s *server) handleSessionRoute(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"error": "method not allowed"})
 }
 
+// hookRowProjection is the column set used by every hook SELECT.
+const hookRowProjection = `
+	toUnixTimestamp64Milli(event_time) AS event_time_ms,
+	event_id,
+	event_name,
+	session_id,
+	if(session_name = '', session_id, session_name) AS session_name,
+	JSONExtractString(payload, 'tool_use_id') AS tool_use_id,
+	event_natural_id,
+	payload
+`
+
 func (s *server) listHooks(w http.ResponseWriter, r *http.Request) {
 	limit := clickhouseUInt(r.URL.Query().Get("limit"), 200)
 	query := fmt.Sprintf(`
-		SELECT
-			toUnixTimestamp64Milli(event_time) AS event_time_ms,
-			event_id,
-			event_name,
-			session_id,
-			if(session_name = '', session_id, session_name) AS session_name,
-			JSONExtractString(payload, 'tool_use_id') AS tool_use_id,
-			payload
+		SELECT %s
 		FROM claude_hooks
 		ORDER BY event_time DESC
 		LIMIT %d
 		FORMAT JSONEachRow
-	`, limit)
+	`, hookRowProjection, limit)
 
 	events, err := s.loadEvents(r.Context(), query, nil)
 	if err != nil {
@@ -274,22 +280,17 @@ func (s *server) listHooks(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) serveHookDetail(w http.ResponseWriter, r *http.Request, eventID string) {
-	// Look up by event_id. If not found, try matching the deterministic
-	// fallback ID computed from a stable subset of the row's natural key.
-	query := `
-		SELECT
-			toUnixTimestamp64Milli(event_time) AS event_time_ms,
-			event_id,
-			event_name,
-			session_id,
-			if(session_name = '', session_id, session_name) AS session_name,
-			JSONExtractString(payload, 'tool_use_id') AS tool_use_id,
-			payload
+	// Match either the synthetic UUID (event_id column) or the deterministic
+	// natural_id (which is what the list endpoint returns for legacy rows
+	// whose UUIDs were re-randomized on every read).
+	query := fmt.Sprintf(`
+		SELECT %s
 		FROM claude_hooks
 		WHERE event_id = {event_id:String}
+		   OR event_natural_id = {event_id:String}
 		LIMIT 1
 		FORMAT JSONEachRow
-	`
+	`, hookRowProjection)
 	data, err := s.queryBytesWithParams(r.Context(), query, nil, url.Values{"param_event_id": []string{eventID}})
 	if err != nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "query failed", "detail": err.Error()})
@@ -297,8 +298,6 @@ func (s *server) serveHookDetail(w http.ResponseWriter, r *http.Request, eventID
 	}
 	line := strings.TrimSpace(string(data))
 	if line == "" {
-		// Fall back to a deterministic hash-based identifier (used for rows
-		// that predate the event_id column).
 		writeJSON(w, http.StatusNotFound, map[string]any{"error": "event not found"})
 		return
 	}
@@ -325,21 +324,14 @@ func (s *server) serveHookDetail(w http.ResponseWriter, r *http.Request, eventID
 }
 
 func (s *server) serveSessionTimeline(w http.ResponseWriter, r *http.Request, sessionID string) {
-	query := `
-		SELECT
-			toUnixTimestamp64Milli(event_time) AS event_time_ms,
-			event_id,
-			event_name,
-			session_id,
-			if(session_name = '', session_id, session_name) AS session_name,
-			JSONExtractString(payload, 'tool_use_id') AS tool_use_id,
-			payload
+	query := fmt.Sprintf(`
+		SELECT %s
 		FROM claude_hooks
 		WHERE session_id = {session_id:String}
 		ORDER BY event_time ASC
 		LIMIT 5000
 		FORMAT JSONEachRow
-	`
+	`, hookRowProjection)
 	params := url.Values{"param_session_id": []string{sessionID}}
 	events, err := s.loadEvents(r.Context(), query, params)
 	if err != nil {
@@ -383,18 +375,21 @@ func (s *server) createHook(w http.ResponseWriter, r *http.Request) {
 	}
 	sessionID := sessionIdentifier(payload)
 	sessionName := sessionLabel(payload, sessionID)
+	toolUseID := firstString(payload, "tool_use_id", "toolUseId")
+	naturalID := computeNaturalID(sessionID, eventName, toolUseID)
 	row := map[string]string{
-		"event_name":   eventName,
-		"session_id":   sessionID,
-		"session_name": sessionName,
-		"payload":      string(body),
+		"event_name":       eventName,
+		"session_id":       sessionID,
+		"session_name":     sessionName,
+		"event_natural_id": naturalID,
+		"payload":          string(body),
 	}
 	rowJSON, err := json.Marshal(row)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "encode row"})
 		return
 	}
-	query := "INSERT INTO claude_hooks (event_name, session_id, session_name, payload) FORMAT JSONEachRow"
+	query := "INSERT INTO claude_hooks (event_name, session_id, session_name, event_natural_id, payload) FORMAT JSONEachRow"
 	if err := s.query(r.Context(), query, append(rowJSON, '\n')); err != nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "insert failed", "detail": err.Error()})
 		return
@@ -420,7 +415,8 @@ func (s *server) ensureSchema(ctx context.Context) error {
 			event_name String,
 			session_id String,
 			session_name String,
-			payload String
+			payload String,
+			event_natural_id String DEFAULT ''
 		) ENGINE = MergeTree
 		ORDER BY (event_time, session_id, event_name)
 	`
@@ -432,6 +428,7 @@ func (s *server) ensureSchema(ctx context.Context) error {
 	add := []string{
 		`ALTER TABLE claude_hooks ADD COLUMN IF NOT EXISTS event_id String DEFAULT generateUUIDv4()`,
 		`ALTER TABLE claude_hooks ADD COLUMN IF NOT EXISTS session_name String AFTER session_id`,
+		`ALTER TABLE claude_hooks ADD COLUMN IF NOT EXISTS event_natural_id String DEFAULT ''`,
 	}
 	for _, stmt := range add {
 		if err := s.exec(deadline, stmt); err != nil {
@@ -439,18 +436,54 @@ func (s *server) ensureSchema(ctx context.Context) error {
 		}
 	}
 
-	// Backfill any rows that still have an empty event_id. This is needed
-	// for rows that were inserted before the column was added. We probe
-	// first so we don't keep rewriting the table on every startup.
-	empty, err := s.countEmptyEventIDs(deadline)
+	// Backfill event_natural_id for any rows that don't have it yet. The
+	// natural ID is a deterministic SHA-256 of the natural key, so it's
+	// stable across re-reads even when the underlying parts haven't been
+	// merged. This is what the detail endpoint uses to look up legacy rows
+	// whose UUIDs were re-randomized on every read.
+	if err := s.backfillNaturalIDs(deadline); err != nil {
+		log.Printf("natural_id backfill failed: %v", err)
+	}
+	return nil
+}
+
+// backfillNaturalIDs populates event_natural_id for rows that don't have one.
+// We do it in Go (not SQL) because ClickHouse has no built-in SHA-256.
+func (s *server) backfillNaturalIDs(ctx context.Context) error {
+	rows, err := s.loadEvents(ctx, `
+		SELECT
+			toUnixTimestamp64Milli(event_time) AS event_time_ms,
+			event_id,
+			event_name,
+			session_id,
+			if(session_name = '', session_id, session_name) AS session_name,
+			JSONExtractString(payload, 'tool_use_id') AS tool_use_id,
+			event_natural_id,
+			payload
+		FROM claude_hooks
+		WHERE event_natural_id = ''
+		LIMIT 10000
+		FORMAT JSONEachRow
+	`, nil)
 	if err != nil {
-		log.Printf("backfill probe failed: %v", err)
-	} else if empty > 0 {
-		log.Printf("backfilling %d rows with empty event_id", empty)
-		if err := s.exec(deadline,
-			`ALTER TABLE claude_hooks UPDATE event_id = generateUUIDv4() WHERE event_id = '' SETTINGS mutations_sync = 1`,
-		); err != nil {
-			log.Printf("backfill event_id failed: %v", err)
+		return err
+	}
+	if len(rows) == 0 {
+		return nil
+	}
+	log.Printf("backfilling %d rows with event_natural_id", len(rows))
+	for _, e := range rows {
+		nat := fallbackEventID(e)
+		// Use INSERT with the explicit event_natural_id; this is a no-op
+		// for the other columns. We need a mutation because event_natural_id
+		// lives in the row, not the payload.
+		query := `ALTER TABLE claude_hooks UPDATE event_natural_id = {nid:String} WHERE event_id = {eid:String} SETTINGS mutations_sync = 1`
+		params := url.Values{
+			"param_nid": []string{nat},
+			"param_eid": []string{e.EventID},
+		}
+		if err := s.queryWithParams(ctx, query, params); err != nil {
+			log.Printf("backfill row %s failed: %v", e.EventID, err)
 		}
 	}
 	return nil
@@ -488,13 +521,14 @@ func (s *server) countEmptyEventIDs(ctx context.Context) (int64, error) {
 // --- ClickHouse helpers ---
 
 type hookRow struct {
-	EventTimeMS string `json:"event_time_ms"`
-	EventID     string `json:"event_id"`
-	EventName   string `json:"event_name"`
-	SessionID   string `json:"session_id"`
-	SessionName string `json:"session_name"`
-	ToolUseID   string `json:"tool_use_id"`
-	Payload     string `json:"payload"`
+	EventTimeMS   string `json:"event_time_ms"`
+	EventID       string `json:"event_id"`
+	EventName     string `json:"event_name"`
+	SessionID     string `json:"session_id"`
+	SessionName   string `json:"session_name"`
+	ToolUseID     string `json:"tool_use_id"`
+	EventNaturalID string `json:"event_natural_id"`
+	Payload       string `json:"payload"`
 }
 
 func (r hookRow) toHookEvent() (*hookEvent, error) {
@@ -508,8 +542,12 @@ func (r hookRow) toHookEvent() (*hookEvent, error) {
 			return nil, fmt.Errorf("decode payload: %w", err)
 		}
 	}
+	id := r.EventID
+	if id == "" {
+		id = r.EventNaturalID
+	}
 	return &hookEvent{
-		EventID:     r.EventID,
+		EventID:     id,
 		EventTime:   time.UnixMilli(eventTime).UTC(),
 		EventName:   r.EventName,
 		SessionID:   r.SessionID,
@@ -614,67 +652,50 @@ func buildSummaries(events []*hookEvent) []eventSummary {
 		return events[i].EventTime.Before(events[j].EventTime)
 	})
 
-	// Pair Pre/Post tool events by tool_use_id.
-	pres := make(map[string]*hookEvent) // tool_use_id -> Pre
+	// Pair Pre/Post tool events by tool_use_id. toolUseIDOf pulls the field
+	// from the payload when the dedicated column wasn't populated.
+	pres := make(map[string]*hookEvent)
 	posts := make(map[string]*hookEvent)
 	for _, e := range events {
 		switch e.EventName {
 		case "PreToolUse":
-			id := e.ToolUseID
-			if id == "" {
-				id = stringFromPayload(e.Payload, "tool_use_id")
-			}
-			if id != "" {
+			if id := toolUseIDOf(e); id != "" {
 				pres[id] = e
 			}
 		case "PostToolUse":
-			id := e.ToolUseID
-			if id == "" {
-				id = stringFromPayload(e.Payload, "tool_use_id")
-			}
-			if id != "" {
+			if id := toolUseIDOf(e); id != "" {
 				posts[id] = e
 			}
 		}
 	}
 
 	out := make([]eventSummary, 0, len(events))
-	emitted := make(map[string]bool) // tool_use_id emitted
+	emitted := make(map[string]bool) // tool_use_id already merged
 
-	// Walk events in chronological order and emit each tool pair when we
-	// first see the Pre (or Post if the Pre is missing). The emitted entry
-	// preserves the position of the first event in the pair.
+	// Walk chronologically and emit each tool pair when we first see it.
+	// The emitted entry preserves the position of whichever event in the
+	// pair was seen first.
 	for _, e := range events {
 		switch e.EventName {
-		case "PreToolUse":
-			id := e.ToolUseID
-			if id == "" {
-				id = stringFromPayload(e.Payload, "tool_use_id")
-			}
+		case "PreToolUse", "PostToolUse":
+			id := toolUseIDOf(e)
 			if id == "" || emitted[id] {
 				continue
 			}
-			pre := pres[id]
-			post := posts[id]
 			emitted[id] = true
-			out = append(out, buildToolSummary(pre, post))
-		case "PostToolUse":
-			id := e.ToolUseID
-			if id == "" {
-				id = stringFromPayload(e.Payload, "tool_use_id")
-			}
-			if id == "" || emitted[id] {
-				continue
-			}
-			pre := pres[id]
-			post := posts[id]
-			emitted[id] = true
-			out = append(out, buildToolSummary(pre, post))
+			out = append(out, buildToolSummary(pres[id], posts[id]))
 		default:
 			out = append(out, buildNonToolSummary(e))
 		}
 	}
 	return out
+}
+
+func toolUseIDOf(e *hookEvent) string {
+	if e.ToolUseID != "" {
+		return e.ToolUseID
+	}
+	return stringFromPayload(e.Payload, "tool_use_id")
 }
 
 func buildNonToolSummary(e *hookEvent) eventSummary {
@@ -775,13 +796,8 @@ func buildToolSummary(pre, post *hookEvent) eventSummary {
 	end := eventTime(post, pre)
 	summary := buildToolOneLiner(toolName, input, post, cwd)
 	status, statusErr, statusHint := computeStatus(toolName, post)
-	processedInput := processInput(toolName, input, post, cwd)
-	processedOutput := processOutput(toolName, input, post, status, statusErr, statusHint, cwd)
-
-	// Strip the huge "originalFile" the Edit tool returns; it's in the raw drawer.
-	if processedOutput != nil {
-		delete(processedOutput, "originalFile")
-	}
+	processedInput := processInput(input, cwd)
+	processedOutput := processOutput(toolName, post, status, statusErr, statusHint, cwd)
 
 	var dur *int64
 	if pre != nil && post != nil {
@@ -865,30 +881,30 @@ func buildToolOneLiner(toolName string, input map[string]any, post *hookEvent, c
 				file = relativizePath(fp, cwd)
 			}
 		}
-		startLine := numberFromMap(input, "offset")
+		// `offset` is 0-based (line 0 is the first line of the file). The
+		// compact row should report 1-based inclusive line numbers like the
+		// file viewer would.
+		startLine := numberFromMap(input, "offset") // 0-based
 		limit := numberFromMap(input, "limit")
 		lines := readNumLines(res)
 		if startLine == 0 && limit == 0 && lines > 0 {
-			// offset defaults to 0, limit defaults to file size
+			// No explicit range; the response tells us the total.
 			if file != "" {
 				return fmt.Sprintf("Read %s (%d lines)", file, lines)
 			}
 		}
 		if startLine > 0 || limit > 0 {
-			// Lines are read from startLine to startLine+lines-1 inclusive
-			// (or startLine+limit-1 when the response doesn't tell us).
-			endLine := startLine + lines
-			if endLine == startLine {
-				endLine = startLine + limit
-			} else if endLine > startLine {
-				// endLine is exclusive; convert to inclusive
-				endLine--
+			// Convert to 1-based: firstLine = startLine+1, lastLine = startLine+lines.
+			firstLine := startLine + 1
+			lastLine := startLine + lines
+			if lastLine <= firstLine {
+				lastLine = startLine + limit
 			}
 			if file != "" {
-				if endLine > startLine {
-					return fmt.Sprintf("Read %s lines %d-%d", file, startLine, endLine)
+				if lastLine > firstLine {
+					return fmt.Sprintf("Read %s lines %d-%d", file, firstLine, lastLine)
 				}
-				return fmt.Sprintf("Read %s lines %d-…", file, startLine)
+				return fmt.Sprintf("Read %s lines %d-…", file, firstLine)
 			}
 		}
 		if file != "" {
@@ -966,7 +982,7 @@ func buildToolOneLiner(toolName string, input map[string]any, post *hookEvent, c
 }
 
 // processInput returns the structured input the UI renders in level 2.
-func processInput(toolName string, input map[string]any, post *hookEvent, cwd string) map[string]any {
+func processInput(input map[string]any, cwd string) map[string]any {
 	if input == nil {
 		return nil
 	}
@@ -999,7 +1015,9 @@ func processInput(toolName string, input map[string]any, post *hookEvent, cwd st
 }
 
 // processOutput returns the structured output the UI renders in level 2.
-func processOutput(toolName string, input map[string]any, post *hookEvent, status, statusErr, statusHint, cwd string) map[string]any {
+// The Edit tool's "originalFile" (huge original blob) is intentionally
+// dropped — the full payload is available via /api/hooks/{event_id}.
+func processOutput(toolName string, post *hookEvent, status, statusErr, statusHint, cwd string) map[string]any {
 	if post == nil {
 		return map[string]any{"pending": true}
 	}
@@ -1016,11 +1034,11 @@ func processOutput(toolName string, input map[string]any, post *hookEvent, statu
 			} else {
 				out[k] = v
 			}
-		case "originalFile", "userModified", "replaceAll":
-			// Skip originalFile (huge) and cosmetic flags.
-			if k == "replaceAll" {
-				out[k] = v
-			}
+		case "originalFile", "userModified":
+			// originalFile can be hundreds of KiB; userModified is a
+			// cosmetic flag. Both are dropped from the summary.
+		case "replaceAll":
+			out[k] = v
 		case "content":
 			if s, ok := v.(string); ok {
 				out[k] = truncate(s, maxStringBytes)
@@ -1183,16 +1201,31 @@ func buildTimeline(summaries []eventSummary) timelineResponse {
 	resp.Session.ID = first.SessionID
 	resp.Session.Name = first.SessionName
 	resp.Session.StartedAt = first.EventTime
-	resp.Session.EndedAt = summaries[len(summaries)-1].endTimeOrTime()
 	resp.Session.EventCount = len(summaries)
-	if t, err := time.Parse(time.RFC3339Nano, resp.Session.StartedAt); err == nil {
-		if e, err := time.Parse(time.RFC3339Nano, resp.Session.EndedAt); err == nil {
-			d := e.Sub(t).Milliseconds()
-			if d < 0 {
-				d = 0
-			}
-			resp.Session.DurationMS = d
+
+	// Walk every summary and compute the chronologically latest end via
+	// time.Time, not string compare. RFC3339Nano strips trailing zeros
+	// ("...00.5Z" vs "...00.50Z") so lex order is unreliable.
+	var startTime, endTime time.Time
+	startTime, _ = time.Parse(time.RFC3339Nano, first.EventTime)
+	for _, s := range summaries {
+		sEv, _ := time.Parse(time.RFC3339Nano, s.EventTime)
+		eEv, _ := time.Parse(time.RFC3339Nano, s.endTimeOrTime())
+		if sEv.Before(startTime) {
+			startTime = sEv
 		}
+		if eEv.After(endTime) {
+			endTime = eEv
+		}
+	}
+	resp.Session.StartedAt = startTime.UTC().Format(time.RFC3339Nano)
+	resp.Session.EndedAt = endTime.UTC().Format(time.RFC3339Nano)
+	if !endTime.IsZero() {
+		d := endTime.Sub(startTime).Milliseconds()
+		if d < 0 {
+			d = 0
+		}
+		resp.Session.DurationMS = d
 	}
 
 	var current *turn
@@ -1203,6 +1236,25 @@ func buildTimeline(summaries []eventSummary) timelineResponse {
 		resp.Turns = append(resp.Turns, *current)
 		current = nil
 	}
+	advanceEndedAt := func(t *turn, candidate string) {
+		// Compare as time.Time so fractional width differences don't fool us.
+		cEv, err := time.Parse(time.RFC3339Nano, candidate)
+		if err != nil {
+			return
+		}
+		if t.EndedAt == "" {
+			t.EndedAt = candidate
+			return
+		}
+		eEv, err := time.Parse(time.RFC3339Nano, t.EndedAt)
+		if err != nil {
+			t.EndedAt = candidate
+			return
+		}
+		if cEv.After(eEv) {
+			t.EndedAt = candidate
+		}
+	}
 	for _, s := range summaries {
 		switch s.Kind {
 		case kindUserPrompt:
@@ -1212,27 +1264,24 @@ func buildTimeline(summaries []eventSummary) timelineResponse {
 				StartedAt: s.EventTime,
 				Prompt:    &promptCopy,
 				Tools:     []eventSummary{},
+				Notes:     []eventSummary{},
 			}
 		case kindTool:
 			if current == nil {
 				// Tool without a preceding prompt: start a synthetic turn.
-				current = &turn{StartedAt: s.EventTime, Tools: []eventSummary{}}
+				current = &turn{StartedAt: s.EventTime, Tools: []eventSummary{}, Notes: []eventSummary{}}
 			}
 			current.Tools = append(current.Tools, s)
 			if s.Status == statusError {
 				resp.Session.FailureCount++
 			}
 			resp.Session.ToolCount++
-			if current.EndedAt == "" || s.endTimeOrTime() > current.EndedAt {
-				current.EndedAt = s.endTimeOrTime()
-			}
+			advanceEndedAt(current, s.endTimeOrTime())
 		case kindAssistantStop:
 			if current != nil {
 				respCopy := s
 				current.Response = &respCopy
-				if current.EndedAt == "" || s.EventTime > current.EndedAt {
-					current.EndedAt = s.EventTime
-				}
+				advanceEndedAt(current, s.EventTime)
 				flush()
 			} else {
 				// Standalone Stop (no preceding prompt): still surface it.
@@ -1243,38 +1292,32 @@ func buildTimeline(summaries []eventSummary) timelineResponse {
 					EndedAt:   s.EventTime,
 					Response:  &stopCopy,
 					Tools:     []eventSummary{},
+					Notes:     []eventSummary{},
 				}
 				flush()
 			}
 		default:
-			// Other event types don't break turns but get folded into the
-			// current one so they remain visible.
+			// Notifications, PermissionRequests, SessionStart/End, PreCompact,
+			// and any other non-tool event are attached to the current turn as
+			// "notes" so they remain visible instead of silently dropping.
 			if current == nil {
-				current = &turn{StartedAt: s.EventTime, Tools: []eventSummary{}}
+				current = &turn{StartedAt: s.EventTime, Tools: []eventSummary{}, Notes: []eventSummary{}}
 			}
 			if s.Status == statusError {
 				resp.Session.FailureCount++
 			}
-			// Attach non-tool events as tool-less entries? Keep it simple:
-			// record session-level stats but don't change the turn shape.
-			if current.EndedAt == "" || s.EventTime > current.EndedAt {
-				current.EndedAt = s.EventTime
-			}
+			current.Notes = append(current.Notes, s)
+			advanceEndedAt(current, s.EventTime)
 		}
 	}
 	flush()
-	resp.Session.TurnCount = countTurns(resp.Turns)
+	// Every rendered turn counts, including synthetic tool-only turns.
+	resp.Session.TurnCount = len(resp.Turns)
 	return resp
 }
 
 func countTurns(turns []turn) int {
-	n := 0
-	for _, t := range turns {
-		if t.Prompt != nil || t.Response != nil {
-			n++
-		}
-	}
-	return n
+	return len(turns)
 }
 
 // --- Session label / id helpers (preserved from original) ---
@@ -1514,14 +1557,8 @@ func pickEventID(pre, post *hookEvent) string {
 	if pre != nil && pre.EventID != "" {
 		return pre.EventID
 	}
-	if post != nil {
+	if post != nil && post.EventID != "" {
 		return post.EventID
-	}
-	if pre != nil {
-		return fallbackEventID(pre)
-	}
-	if post != nil {
-		return fallbackEventID(post)
 	}
 	return ""
 }
@@ -1585,16 +1622,19 @@ func patchStats(response map[string]any) (add, rem int, ok bool) {
 
 // fallbackEventID generates a stable identifier for rows that don't yet
 // have a UUID (e.g. rows inserted before the event_id column existed).
+// computeNaturalID returns the deterministic natural identifier for a row,
+// derived from the natural key (session_id, event_name, tool_use_id). The
+// event_time is intentionally excluded so the ID is stable across parts
+// that haven't been merged and across re-inserts.
+func computeNaturalID(sessionID, eventName, toolUseID string) string {
+	h := sha256.Sum256([]byte(strings.Join([]string{sessionID, eventName, toolUseID}, "|")))
+	return "legacy-" + hex.EncodeToString(h[:12])
+}
+
 // The resulting ID is deterministic for the same natural key, so the UI
 // can round-trip through it.
 func fallbackEventID(e *hookEvent) string {
-	h := sha256.Sum256([]byte(strings.Join([]string{
-		e.SessionID,
-		e.EventTime.UTC().Format(time.RFC3339Nano),
-		e.EventName,
-		e.ToolUseID,
-	}, "|")))
-	return "legacy-" + hex.EncodeToString(h[:12])
+	return computeNaturalID(e.SessionID, e.EventName, e.ToolUseID)
 }
 
 // classifyEvent maps the raw event_name to a normalized kind.

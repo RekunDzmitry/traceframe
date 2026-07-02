@@ -993,6 +993,68 @@
       loadHooks();
       setInterval(loadHooks, REFRESH_MS);
 
+      // ---------- Self-tests ----------
+      //
+      // Tiny in-page test runner used by the headless browser smoke test.
+      // Assertions are written to <div id="__tests"> so they can be scraped
+      // and asserted on in CI. Disable with ?notests=1.
+
+      function runSelfTests() {
+        const url = new URL(window.location.href);
+        if (url.searchParams.get("notests") === "1") return;
+        const out = document.createElement("div");
+        out.id = "__tests";
+        out.style.cssText = "position:fixed;bottom:0;left:0;background:#fff;color:#000;font:12px monospace;padding:6px;z-index:9999;max-width:100%;white-space:pre;";
+        document.body.appendChild(out);
+        const results = [];
+        const t = (name, cond, detail) => {
+          results.push(`${cond ? "PASS" : "FAIL"} ${name}${detail ? " — " + detail : ""}`);
+        };
+
+        // Issue 7: min-duration filter does not drop prompts/responses.
+        const evs = [
+          { kind: "user_prompt", duration_ms: 0, event_id: "p1" },
+          { kind: "assistant_stop", duration_ms: 0, event_id: "r1" },
+          { kind: "tool", tool_name: "Bash", duration_ms: 100, event_id: "t1" },
+          { kind: "tool", tool_name: "Bash", duration_ms: 5000, event_id: "t2" },
+        ];
+        state.filters = { failures: false, kind: "", tool: "", minDuration: 1000, file: "" };
+        const out7 = applyFilters(evs);
+        t(
+          "minDuration keeps prompts and responses",
+          out7.some((e) => e.event_id === "p1") && out7.some((e) => e.event_id === "r1"),
+          `kept=${out7.map((e) => e.event_id).join(",")}`,
+        );
+        t(
+          "minDuration drops slow-ish tools? no — keeps tools >= 1000ms",
+          out7.some((e) => e.event_id === "t2") && !out7.some((e) => e.event_id === "t1"),
+          `kept=${out7.map((e) => e.event_id).join(",")}`,
+        );
+
+        // Issue 6: stale tool filter value is cleared when the tool is no
+        // longer in the list.
+        state.filters = { failures: false, kind: "", tool: "NotPresent", minDuration: 0, file: "" };
+        populateToolFilter([{ tool_name: "Read" }, { tool_name: "Write" }]);
+        t(
+          "stale tool filter is cleared",
+          state.filters.tool === "" && $("#filter-tool").value === "",
+          `tool=${state.filters.tool}, dropdown=${$("#filter-tool").value}`,
+        );
+        state.filters = { failures: false, kind: "", tool: "Read", minDuration: 0, file: "" };
+        populateToolFilter([{ tool_name: "Read" }, { tool_name: "Write" }]);
+        t(
+          "present tool filter is preserved",
+          state.filters.tool === "Read" && $("#filter-tool").value === "Read",
+          `tool=${state.filters.tool}, dropdown=${$("#filter-tool").value}`,
+        );
+
+        out.textContent = results.join("\n");
+        out.dataset.summary = results.every((r) => r.startsWith("PASS")) ? "ok" : "fail";
+      }
+
+      // Run after a beat so the initial render and filter wiring have settled.
+      setTimeout(runSelfTests, 100);
+
       // ---------- API ----------
 
       async function loadHooks() {
@@ -1071,11 +1133,19 @@
         if (state.selectedSession === "all") {
           state.timeline = null;
           renderAllView(sessions);
-        } else {
-          ensureTimelineForSelected().then(() => {
-            renderSessionView();
-          });
+          return;
         }
+        // For the selected session, only re-render when the timeline object
+        // has actually changed. A 5s tick that hits the cached timeline
+        // would otherwise tear down every row and pay for a full DOM
+        // rebuild + scroll reset for no visible change.
+        const cached = state.timeline && state.timeline.session?.id === state.selectedSession;
+        if (cached) {
+          return;
+        }
+        ensureTimelineForSelected().then(() => {
+          renderSessionView();
+        });
       }
 
       function buildSessions(hooks) {
@@ -1787,7 +1857,7 @@
 
       function populateToolFilter(events) {
         const select = $("#filter-tool");
-        const current = select.value;
+        const current = state.filters.tool;
         const tools = new Set();
         for (const ev of events) {
           if (ev.tool_name) tools.add(ev.tool_name);
@@ -1804,7 +1874,15 @@
           opt.textContent = t;
           select.appendChild(opt);
         }
-        if (ordered.includes(current)) select.value = current;
+        // If the previously selected tool is no longer in the list, drop
+        // both the dropdown selection and the filter so the view doesn't
+        // silently empty out.
+        if (current && ordered.includes(current)) {
+          select.value = current;
+        } else if (current) {
+          state.filters.tool = "";
+          select.value = "";
+        }
       }
 
       function onFilterInput(e) {
@@ -1848,7 +1926,10 @@
           if (state.filters.failures && ev.status !== "error") return false;
           if (state.filters.kind && ev.kind !== state.filters.kind) return false;
           if (state.filters.tool && ev.tool_name !== state.filters.tool) return false;
-          if (state.filters.minDuration > 0) {
+          // Min duration only applies to tool events. Prompts, responses,
+          // and other rows have no duration, so applying the filter
+          // would silently drop them.
+          if (state.filters.minDuration > 0 && ev.kind === "tool") {
             const d = ev.duration_ms || 0;
             if (d < state.filters.minDuration) return false;
           }

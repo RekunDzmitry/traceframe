@@ -215,7 +215,7 @@ func TestReadSummary(t *testing.T) {
 			"cwd":        "/home/user/proj",
 			"tool_input": map[string]any{
 				"file_path": "/home/user/proj/README.md",
-				"offset":    1,
+				"offset":    0, // 0-based
 				"limit":     120,
 			},
 		},
@@ -228,7 +228,7 @@ func TestReadSummary(t *testing.T) {
 			"tool_response": map[string]any{
 				"filePath":   "/home/user/proj/README.md",
 				"numLines":   120,
-				"startLine":  1,
+				"startLine":  0,
 				"totalLines": 320,
 				"content":    "line 1\nline 2\n...",
 			},
@@ -252,7 +252,7 @@ func TestReadSummaryNestedFile(t *testing.T) {
 			"cwd":        "/home/user/proj",
 			"tool_input": map[string]any{
 				"file_path": "/home/user/proj/README.md",
-				"offset":    1,
+				"offset":    0, // 0-based
 				"limit":     120,
 			},
 		},
@@ -310,11 +310,11 @@ func TestFallbackEventID(t *testing.T) {
 
 func TestProcessInputTruncatesLongStrings(t *testing.T) {
 	long := strings.Repeat("a", maxStringBytes*2)
-	out := processInput("Edit", map[string]any{
+	out := processInput(map[string]any{
 		"file_path":  "/x",
 		"old_string": long,
 		"new_string": long,
-	}, nil, "")
+	}, "")
 	if len(out["old_string"].(string)) > maxStringBytes+10 {
 		t.Errorf("old_string not truncated: %d bytes", len(out["old_string"].(string)))
 	}
@@ -338,5 +338,273 @@ func TestExtractEffort(t *testing.T) {
 	}
 	if got := extractEffort(map[string]any{"effort": map[string]any{}}); got != "" {
 		t.Errorf("empty nested: %q", got)
+	}
+}
+
+// Issue 2: Non-tool events (Notification, PermissionRequest, SessionStart/End,
+// PreCompact) should appear in the per-session timeline, not vanish.
+func TestTimelineIncludesNonToolEvents(t *testing.T) {
+	base := time.Date(2026, 6, 30, 10, 0, 0, 0, time.UTC)
+	events := []*hookEvent{
+		hookEventFromPayload(t, "SessionStart", "s1", "ss1", "", base, map[string]any{"source": "startup"}),
+		hookEventFromPayload(t, "UserPromptSubmit", "s1", "p1", "", base.Add(1*time.Second), map[string]any{"prompt": "do thing"}),
+		hookEventFromPayload(t, "Notification", "s1", "n1", "", base.Add(2*time.Second), map[string]any{"message": "needs permission"}),
+		hookEventFromPayload(t, "PreToolUse", "s1", "pre1", "tu-1", base.Add(3*time.Second), map[string]any{
+			"tool_name": "Bash", "tool_use_id": "tu-1",
+			"tool_input": map[string]any{"command": "ls"},
+		}),
+		hookEventFromPayload(t, "PostToolUse", "s1", "post1", "tu-1", base.Add(4*time.Second), map[string]any{
+			"tool_name": "Bash", "tool_use_id": "tu-1",
+			"tool_response": map[string]any{"exitCode": 0},
+		}),
+		hookEventFromPayload(t, "PermissionRequest", "s1", "pr1", "", base.Add(5*time.Second), map[string]any{"tool_name": "Bash"}),
+		hookEventFromPayload(t, "PreCompact", "s1", "pc1", "", base.Add(6*time.Second), map[string]any{"trigger": "auto"}),
+		hookEventFromPayload(t, "Stop", "s1", "stop1", "", base.Add(7*time.Second), map[string]any{"stop_hook_active": true}),
+		hookEventFromPayload(t, "SessionEnd", "s1", "se1", "", base.Add(8*time.Second), map[string]any{"reason": "logout"}),
+	}
+	summaries := buildSummaries(events)
+	tl := buildTimeline(summaries)
+
+	// Collect every kind rendered into the timeline.
+	seen := map[string]int{}
+	for _, turn := range tl.Turns {
+		for _, tool := range turn.Tools {
+			seen[tool.Kind]++
+		}
+		for _, note := range turn.Notes {
+			seen[note.Kind]++
+		}
+		if turn.Prompt != nil {
+			seen[turn.Prompt.Kind]++
+		}
+		if turn.Response != nil {
+			seen[turn.Response.Kind]++
+		}
+	}
+	for _, want := range []string{"notification", "permission_request", "compact", "session_start", "session_end"} {
+		if seen[want] == 0 {
+			t.Errorf("kind %q missing from timeline", want)
+		}
+	}
+}
+
+// Issue 4: EndedAt and DurationMS must reflect the chronologically latest end,
+// not the end of whichever event happens to be last in the slice. The slice
+// is ordered by start time, so a tool whose Post lands after a Stop has a
+// later end but an earlier start.
+func TestSessionEndTimeUsesMaxEnd(t *testing.T) {
+	base := time.Date(2026, 6, 30, 10, 0, 0, 0, time.UTC)
+	events := []*hookEvent{
+		// tool: starts 10:00, ends 10:10 (5 min duration)
+		hookEventFromPayload(t, "PreToolUse", "s1", "pre1", "tu-1", base, map[string]any{
+			"tool_name": "Bash", "tool_use_id": "tu-1",
+			"tool_input": map[string]any{"command": "sleep 5"},
+		}),
+		hookEventFromPayload(t, "PostToolUse", "s1", "post1", "tu-1", base.Add(10*time.Minute), map[string]any{
+			"tool_name": "Bash", "tool_use_id": "tu-1",
+			"tool_response": map[string]any{"exitCode": 0},
+		}),
+		// prompt at 10:02
+		hookEventFromPayload(t, "UserPromptSubmit", "s1", "p1", "", base.Add(2*time.Minute), map[string]any{"prompt": "go"}),
+		// stop at 10:03 (lands before the tool's Post at 10:10)
+		hookEventFromPayload(t, "Stop", "s1", "stop1", "", base.Add(3*time.Minute), map[string]any{"stop_hook_active": true}),
+	}
+	summaries := buildSummaries(events)
+	tl := buildTimeline(summaries)
+
+	gotEnd, err := time.Parse(time.RFC3339Nano, tl.Session.EndedAt)
+	if err != nil {
+		t.Fatalf("parse EndedAt: %v", err)
+	}
+	wantEnd := base.Add(10 * time.Minute)
+	if !gotEnd.Equal(wantEnd) {
+		t.Errorf("EndedAt = %v, want %v (the tool's Post at 10:10, not the Stop at 10:03)", gotEnd, wantEnd)
+	}
+	if tl.Session.DurationMS != 10*60*1000 {
+		t.Errorf("DurationMS = %d, want %d", tl.Session.DurationMS, 10*60*1000)
+	}
+}
+
+// Issue 4 follow-up: timestamps with stripped trailing zeros must still
+// compare correctly. RFC3339Nano emits "...00.5Z" for half-second times, and
+// the slice uses lexicographic string compare to find the latest end.
+func TestSessionEndTimeLexicographicCompare(t *testing.T) {
+	base := time.Date(2026, 6, 30, 10, 0, 0, 500_000_000, time.UTC) // 10:00:00.5
+	events := []*hookEvent{
+		// first event ends at 10:00:00.5 → "...00.5Z"
+		hookEventFromPayload(t, "PreToolUse", "s1", "pre1", "tu-1", base, map[string]any{
+			"tool_name": "Bash", "tool_use_id": "tu-1",
+			"tool_input": map[string]any{"command": "x"},
+		}),
+		hookEventFromPayload(t, "PostToolUse", "s1", "post1", "tu-1", base, map[string]any{
+			"tool_name": "Bash", "tool_use_id": "tu-1",
+			"tool_response": map[string]any{"exitCode": 0},
+		}),
+		// second event ends at 10:00:01 → "...01Z" (lexicographically smaller than "...00.5Z"? No,
+		// but the bug is that "10:00:00.5Z" < "10:00:00.500Z" when comparing strings, so
+		// the timestamp width matters).
+		hookEventFromPayload(t, "Stop", "s1", "stop1", "", base.Add(500*time.Millisecond), map[string]any{"stop_hook_active": true}),
+	}
+	summaries := buildSummaries(events)
+	tl := buildTimeline(summaries)
+
+	gotEnd, err := time.Parse(time.RFC3339Nano, tl.Session.EndedAt)
+	if err != nil {
+		t.Fatalf("parse EndedAt: %v", err)
+	}
+	wantEnd := base.Add(500 * time.Millisecond)
+	if !gotEnd.Equal(wantEnd) {
+		t.Errorf("EndedAt = %v, want %v (the Stop's timestamp, which is later than the tool's 10:00:00.5)", gotEnd, wantEnd)
+	}
+}
+
+// Issue 5: turn_count must equal the number of rendered turns, even for
+// tool-only turns (no preceding prompt).
+func TestTurnCountIncludesToolOnlyTurn(t *testing.T) {
+	base := time.Date(2026, 6, 30, 10, 0, 0, 0, time.UTC)
+	events := []*hookEvent{
+		// tool with no preceding prompt
+		hookEventFromPayload(t, "PreToolUse", "s1", "pre1", "tu-1", base, map[string]any{
+			"tool_name": "Read", "tool_use_id": "tu-1",
+			"tool_input": map[string]any{"file_path": "/x"},
+		}),
+		hookEventFromPayload(t, "PostToolUse", "s1", "post1", "tu-1", base.Add(time.Second), map[string]any{
+			"tool_name": "Read", "tool_use_id": "tu-1",
+			"tool_response": map[string]any{"file": map[string]any{"filePath": "/x", "numLines": 10}},
+		}),
+	}
+	summaries := buildSummaries(events)
+	tl := buildTimeline(summaries)
+
+	if len(tl.Turns) != 1 {
+		t.Errorf("len(Turns) = %d, want 1", len(tl.Turns))
+	}
+	if tl.Session.TurnCount != 1 {
+		t.Errorf("TurnCount = %d, want 1 (must match rendered turns)", tl.Session.TurnCount)
+	}
+}
+
+// Issue 8: Read one-liner should render 1-based inclusive line ranges.
+// offset=0, limit=100, numLines=100 → "Read … lines 1-100", not "0-99".
+func TestReadOneLinerLineRangeOffsetZero(t *testing.T) {
+	pre := hookEventFromPayload(t, "PreToolUse", "s1", "pre1", "tu-1",
+		time.Date(2026, 6, 30, 10, 0, 0, 0, time.UTC),
+		map[string]any{
+			"tool_name":  "Read",
+			"tool_use_id": "tu-1",
+			"cwd":        "/proj",
+			"tool_input": map[string]any{
+				"file_path": "/proj/main.go",
+				"limit":     100,
+			},
+		},
+	)
+	post := hookEventFromPayload(t, "PostToolUse", "s1", "post1", "tu-1",
+		time.Date(2026, 6, 30, 10, 0, 0, 50_000_000, time.UTC),
+		map[string]any{
+			"tool_name":  "Read",
+			"tool_use_id": "tu-1",
+			"tool_response": map[string]any{
+				"file": map[string]any{
+					"filePath":   "/proj/main.go",
+					"numLines":   100,
+					"startLine":  0,
+					"totalLines": 500,
+				},
+			},
+		},
+	)
+	summaries := buildSummaries([]*hookEvent{pre, post})
+	if summaries[0].Summary != "Read main.go lines 1-100" {
+		t.Errorf("summary = %q, want %q", summaries[0].Summary, "Read main.go lines 1-100")
+	}
+}
+
+// Issue 8: offset=10, limit=20 → "Read … lines 11-30" (offset is 0-based).
+func TestReadOneLinerLineRangeOffset(t *testing.T) {
+	pre := hookEventFromPayload(t, "PreToolUse", "s1", "pre1", "tu-1",
+		time.Date(2026, 6, 30, 10, 0, 0, 0, time.UTC),
+		map[string]any{
+			"tool_name":  "Read",
+			"tool_use_id": "tu-1",
+			"cwd":        "/proj",
+			"tool_input": map[string]any{
+				"file_path": "/proj/main.go",
+				"offset":    10,
+				"limit":     20,
+			},
+		},
+	)
+	post := hookEventFromPayload(t, "PostToolUse", "s1", "post1", "tu-1",
+		time.Date(2026, 6, 30, 10, 0, 0, 50_000_000, time.UTC),
+		map[string]any{
+			"tool_name":  "Read",
+			"tool_use_id": "tu-1",
+			"tool_response": map[string]any{
+				"file": map[string]any{
+					"filePath":   "/proj/main.go",
+					"numLines":   20,
+					"startLine":  10,
+					"totalLines": 500,
+				},
+			},
+		},
+	)
+	summaries := buildSummaries([]*hookEvent{pre, post})
+	if summaries[0].Summary != "Read main.go lines 11-30" {
+		t.Errorf("summary = %q, want %q", summaries[0].Summary, "Read main.go lines 11-30")
+	}
+}
+
+// Issue 3: the natural ID is deterministic for a given (session, event_name,
+// tool_use_id) triple, so legacy rows whose UUIDs are re-randomized on every
+// read can still be looked up by the natural ID.
+func TestNaturalIDIsStable(t *testing.T) {
+	now := time.Date(2026, 6, 30, 10, 0, 0, 0, time.UTC)
+	a := &hookEvent{SessionID: "s1", EventTime: now, EventName: "PreToolUse", ToolUseID: "tu-1"}
+	b := &hookEvent{SessionID: "s1", EventTime: now, EventName: "PreToolUse", ToolUseID: "tu-1"}
+	c := &hookEvent{SessionID: "s1", EventTime: now, EventName: "PreToolUse", ToolUseID: "tu-2"}
+	if fallbackEventID(a) != fallbackEventID(b) {
+		t.Error("natural ID should be stable for the same natural key")
+	}
+	if fallbackEventID(a) == fallbackEventID(c) {
+		t.Error("natural ID should differ when tool_use_id differs")
+	}
+	if fallbackEventID(a) != computeNaturalID("s1", "PreToolUse", "tu-1") {
+		t.Error("fallbackEventID should defer to computeNaturalID")
+	}
+}
+
+// The natural ID must not include event_time, so a row whose event_time
+// drifts across re-inserts still resolves to the same ID.
+func TestNaturalIDExcludesEventTime(t *testing.T) {
+	t1 := time.Date(2026, 6, 30, 10, 0, 0, 0, time.UTC)
+	t2 := time.Date(2026, 6, 30, 10, 0, 1, 0, time.UTC)
+	a := &hookEvent{SessionID: "s1", EventTime: t1, EventName: "PreToolUse", ToolUseID: "tu-1"}
+	b := &hookEvent{SessionID: "s1", EventTime: t2, EventName: "PreToolUse", ToolUseID: "tu-1"}
+	if fallbackEventID(a) != fallbackEventID(b) {
+		t.Error("natural ID should not depend on event_time")
+	}
+}
+
+// The toHookEvent path picks the natural ID when the synthetic UUID is
+// missing, so the list endpoint always returns a stable ID.
+func TestHookRowUsesNaturalID(t *testing.T) {
+	row := hookRow{
+		EventTimeMS:    "1700000000000",
+		EventID:        "", // legacy row: UUID was re-randomized
+		EventName:      "PreToolUse",
+		SessionID:      "s1",
+		SessionName:    "s1",
+		ToolUseID:      "tu-1",
+		EventNaturalID: "legacy-abc123",
+		Payload:        `{}`,
+	}
+	event, err := row.toHookEvent()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if event.EventID != "legacy-abc123" {
+		t.Errorf("event_id = %q, want natural ID", event.EventID)
 	}
 }
