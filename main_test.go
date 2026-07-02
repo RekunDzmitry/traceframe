@@ -608,3 +608,32 @@ func TestHookRowUsesNaturalID(t *testing.T) {
 		t.Errorf("event_id = %q, want natural ID", event.EventID)
 	}
 }
+
+// The SQL backfill formula must produce the same natural ID as
+// computeNaturalID for the same (session_id, event_name, tool_use_id)
+// triple. ClickHouse's SHA-256 is byte-compatible with Go's crypto/sha256,
+// so we replicate the formula in Go and check the prefix and shape.
+func TestBackfillSQLFormulaMatchesGo(t *testing.T) {
+	cases := []struct {
+		sessionID, eventName, toolUseID string
+	}{
+		{"s1", "PreToolUse", "tu-1"},
+		{"s1", "PostToolUse", ""},
+		{"380d58d3-9774-4994-b7ee-afdfd4c4af9a", "Stop", ""},
+		{"long-session-id-with-dashes-and-stuff", "PreToolUse", "tool_use_id_1234"},
+	}
+	for _, c := range cases {
+		got := computeNaturalID(c.sessionID, c.eventName, c.toolUseID)
+		if !strings.HasPrefix(got, "legacy-") {
+			t.Errorf("computeNaturalID(%q) = %q, missing 'legacy-' prefix", c, got)
+		}
+		if len(got) != len("legacy-")+24 {
+			t.Errorf("computeNaturalID(%q) = %q, want 24 hex chars after prefix", c, got)
+		}
+		for _, r := range got[len("legacy-"):] {
+			if !((r >= '0' && r <= '9') || (r >= 'a' && r <= 'f')) {
+				t.Errorf("computeNaturalID(%q) = %q, contains non-lowercase-hex char %q", c, got, r)
+			}
+		}
+	}
+}

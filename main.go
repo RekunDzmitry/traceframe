@@ -437,10 +437,11 @@ func (s *server) ensureSchema(ctx context.Context) error {
 	}
 
 	// Backfill event_natural_id for any rows that don't have it yet. The
-	// natural ID is a deterministic SHA-256 of the natural key, so it's
-	// stable across re-reads even when the underlying parts haven't been
-	// merged. This is what the detail endpoint uses to look up legacy rows
-	// whose UUIDs were re-randomized on every read.
+	// natural ID is a deterministic SHA-256 of the natural key, computed
+	// in ClickHouse so the formula stays in lockstep with computeNaturalID
+	// in Go. This is a single mutation, not a per-row loop, so it doesn't
+	// hammer the server and survives the 60s ensureSchema deadline even
+	// on large legacy datasets.
 	if err := s.backfillNaturalIDs(deadline); err != nil {
 		log.Printf("natural_id backfill failed: %v", err)
 	}
@@ -448,74 +449,20 @@ func (s *server) ensureSchema(ctx context.Context) error {
 }
 
 // backfillNaturalIDs populates event_natural_id for rows that don't have one.
-// We do it in Go (not SQL) because ClickHouse has no built-in SHA-256.
+// Implemented as a single ClickHouse mutation whose target is keyed on
+// event_natural_id (the column being filled), not on event_id. This is
+// critical: for legacy rows added via ALTER TABLE ... ADD COLUMN ... DEFAULT
+// generateUUIDv4(), ClickHouse re-randomizes the UUID at read time, so a
+// predicate on event_id would never match the row we just SELECTed. The
+// WHERE clause must use the column being mutated.
 func (s *server) backfillNaturalIDs(ctx context.Context) error {
-	rows, err := s.loadEvents(ctx, `
-		SELECT
-			toUnixTimestamp64Milli(event_time) AS event_time_ms,
-			event_id,
-			event_name,
-			session_id,
-			if(session_name = '', session_id, session_name) AS session_name,
-			JSONExtractString(payload, 'tool_use_id') AS tool_use_id,
-			event_natural_id,
-			payload
-		FROM claude_hooks
-		WHERE event_natural_id = ''
-		LIMIT 10000
-		FORMAT JSONEachRow
-	`, nil)
-	if err != nil {
+	query := `ALTER TABLE claude_hooks UPDATE event_natural_id = ` +
+		`concat('legacy-', substring(lower(hex(SHA256(concat(session_id, '|', event_name, '|', JSONExtractString(payload, 'tool_use_id'))))), 1, 24)) ` +
+		`WHERE event_natural_id = '' SETTINGS mutations_sync = 1`
+	if err := s.queryWithParams(ctx, query, nil); err != nil {
 		return err
 	}
-	if len(rows) == 0 {
-		return nil
-	}
-	log.Printf("backfilling %d rows with event_natural_id", len(rows))
-	for _, e := range rows {
-		nat := fallbackEventID(e)
-		// Use INSERT with the explicit event_natural_id; this is a no-op
-		// for the other columns. We need a mutation because event_natural_id
-		// lives in the row, not the payload.
-		query := `ALTER TABLE claude_hooks UPDATE event_natural_id = {nid:String} WHERE event_id = {eid:String} SETTINGS mutations_sync = 1`
-		params := url.Values{
-			"param_nid": []string{nat},
-			"param_eid": []string{e.EventID},
-		}
-		if err := s.queryWithParams(ctx, query, params); err != nil {
-			log.Printf("backfill row %s failed: %v", e.EventID, err)
-		}
-	}
 	return nil
-}
-
-func (s *server) countEmptyEventIDs(ctx context.Context) (int64, error) {
-	data, err := s.queryBytes(ctx, `SELECT count() AS n FROM claude_hooks WHERE event_id = '' FORMAT JSONEachRow`, nil)
-	if err != nil {
-		return 0, err
-	}
-	line := strings.TrimSpace(string(data))
-	if line == "" {
-		return 0, nil
-	}
-	var row struct {
-		N json.Number `json:"n"`
-	}
-	if err := json.Unmarshal([]byte(line), &row); err != nil {
-		return 0, err
-	}
-	if row.N == "" {
-		return 0, nil
-	}
-	i, err := row.N.Int64()
-	if err != nil {
-		f, err := row.N.Float64()
-		if err != nil {
-			return 0, err
-		}
-		return int64(f), nil
-	}
-	return i, nil
 }
 
 // --- ClickHouse helpers ---
@@ -542,9 +489,13 @@ func (r hookRow) toHookEvent() (*hookEvent, error) {
 			return nil, fmt.Errorf("decode payload: %w", err)
 		}
 	}
-	id := r.EventID
+	// Prefer the natural_id. It's deterministic, so the same row gets the
+	// same public ID across re-reads (and across re-inserts if the same
+	// hook fires twice). The synthetic UUID is only used as a last resort
+	// for rows that predate the natural_id column entirely.
+	id := r.EventNaturalID
 	if id == "" {
-		id = r.EventNaturalID
+		id = r.EventID
 	}
 	return &hookEvent{
 		EventID:     id,
