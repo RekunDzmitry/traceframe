@@ -2,10 +2,103 @@ package main
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 )
+
+func TestBuildSummariesAddsContextUsageFromCodexTranscript(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("TRACEFRAME_TRANSCRIPT_ROOT", root)
+	transcript := filepath.Join(root, "rollout-2026-07-03-test.jsonl")
+	contents := strings.Join([]string{
+		`{"timestamp":"2026-07-03T10:00:00Z","type":"response_item","payload":{"type":"message"}}`,
+		`{"timestamp":"2026-07-03T10:00:02.100Z","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":16510,"output_tokens":134,"total_tokens":16644},"model_context_window":353400}}}`,
+	}, "\n")
+	if err := os.WriteFile(transcript, []byte(contents), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	base := time.Date(2026, 7, 3, 10, 0, 1, 0, time.UTC)
+	pre := hookEventFromPayload(t, "PreToolUse", "s1", "pre1", "tu-1", base, map[string]any{
+		"tool_name": "Bash", "tool_use_id": "tu-1", "transcript_path": transcript,
+		"tool_input": map[string]any{"command": "git status"},
+	})
+	post := hookEventFromPayload(t, "PostToolUse", "s1", "post1", "tu-1", base.Add(time.Second), map[string]any{
+		"tool_name": "Bash", "tool_use_id": "tu-1", "transcript_path": transcript,
+		"tool_response": map[string]any{"exitCode": 0},
+	})
+
+	summaries := buildSummaries([]*hookEvent{pre, post})
+	if len(summaries) != 1 {
+		t.Fatalf("expected 1 summary, got %d", len(summaries))
+	}
+	if summaries[0].ContextTokens != 16644 {
+		t.Errorf("ContextTokens = %d, want 16644", summaries[0].ContextTokens)
+	}
+	if summaries[0].ContextWindow != 353400 {
+		t.Errorf("ContextWindow = %d, want 353400", summaries[0].ContextWindow)
+	}
+}
+
+func TestContextUsageRejectsTranscriptOutsideConfiguredRoot(t *testing.T) {
+	t.Setenv("TRACEFRAME_TRANSCRIPT_ROOT", t.TempDir())
+	outside := filepath.Join(t.TempDir(), "rollout-outside.jsonl")
+	if err := os.WriteFile(outside, []byte(`{"timestamp":"2026-07-03T10:00:02Z","payload":{"type":"token_count","info":{"last_token_usage":{"total_tokens":100},"model_context_window":1000}}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	event := hookEventFromPayload(t, "PreToolUse", "s1", "pre1", "tu-1", time.Date(2026, 7, 3, 10, 0, 1, 0, time.UTC), map[string]any{
+		"tool_name": "Read", "tool_use_id": "tu-1", "transcript_path": outside,
+	})
+
+	summaries := buildSummaries([]*hookEvent{event})
+	if summaries[0].ContextTokens != 0 || summaries[0].ContextWindow != 0 {
+		t.Fatalf("outside transcript was read: %+v", summaries[0])
+	}
+}
+
+func TestBuildSummariesAddsContextUsageFromClaudeTranscript(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("TRACEFRAME_CLAUDE_TRANSCRIPT_ROOT", root)
+	transcript := filepath.Join(root, "session-id.jsonl")
+	contents := strings.Join([]string{
+		`{"timestamp":"2026-07-03T10:00:01.950Z","message":{"role":"assistant","model":"claude-opus-4-8","usage":{"input_tokens":2,"cache_creation_input_tokens":603,"cache_read_input_tokens":167564,"output_tokens":145}}}`,
+		`{"timestamp":"2026-07-03T10:00:03Z","message":{"role":"assistant","model":"claude-opus-4-8","usage":{"input_tokens":2,"cache_creation_input_tokens":900,"cache_read_input_tokens":170000,"output_tokens":200}}}`,
+	}, "\n")
+	if err := os.WriteFile(transcript, []byte(contents), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	event := hookEventFromPayload(t, "PreToolUse", "s1", "pre1", "tu-1", time.Date(2026, 7, 3, 10, 0, 2, 0, time.UTC), map[string]any{
+		"tool_name": "Read", "tool_use_id": "tu-1", "transcript_path": transcript,
+	})
+	summaries := buildSummaries([]*hookEvent{event})
+	if summaries[0].ContextTokens != 168314 {
+		t.Errorf("ContextTokens = %d, want 168314", summaries[0].ContextTokens)
+	}
+	if summaries[0].ContextWindow != 1000000 {
+		t.Errorf("ContextWindow = %d, want 1000000", summaries[0].ContextWindow)
+	}
+}
+
+func TestClaudeContextWindowUsesFallbackForOtherModels(t *testing.T) {
+	t.Setenv("TRACEFRAME_CLAUDE_CONTEXT_WINDOW", "250000")
+	if got := claudeContextWindow("claude-opus-4-8"); got != 1_000_000 {
+		t.Errorf("Opus 4.8 window = %d, want 1000000", got)
+	}
+	if got := claudeContextWindow("claude-haiku-4-5-20251001"); got != 250_000 {
+		t.Errorf("configured fallback = %d, want 250000", got)
+	}
+}
+
+func TestBrowserSelfTestsAreOptIn(t *testing.T) {
+	html := string(indexHTML)
+	if !strings.Contains(html, `url.searchParams.get("tests") !== "1"`) {
+		t.Fatal("browser self-tests must only run when ?tests=1 is present")
+	}
+}
 
 // hookEventFromPayload builds a hookEvent from a JSON-encoded payload.
 func hookEventFromPayload(t *testing.T, name, sessionID, eventID, toolUseID string, at time.Time, payload map[string]any) *hookEvent {
@@ -33,9 +126,9 @@ func TestMergePrePost(t *testing.T) {
 	pre := hookEventFromPayload(t, "PreToolUse", "s1", "e1", "tu-1",
 		time.Date(2026, 6, 30, 12, 0, 0, 0, time.UTC),
 		map[string]any{
-			"tool_name":  "Edit",
+			"tool_name":   "Edit",
 			"tool_use_id": "tu-1",
-			"cwd":        "/home/user/proj",
+			"cwd":         "/home/user/proj",
 			"tool_input": map[string]any{
 				"file_path":   "/home/user/proj/static/index.html",
 				"old_string":  "old",
@@ -48,17 +141,17 @@ func TestMergePrePost(t *testing.T) {
 	post := hookEventFromPayload(t, "PostToolUse", "s1", "e2", "tu-1",
 		time.Date(2026, 6, 30, 12, 0, 0, 21_000_000, time.UTC),
 		map[string]any{
-			"tool_name":  "Edit",
+			"tool_name":   "Edit",
 			"tool_use_id": "tu-1",
 			"tool_response": map[string]any{
 				"filePath": "/home/user/proj/static/index.html",
 				"structuredPatch": []any{
 					map[string]any{
-						"oldStart":  1,
-						"oldLines":  1,
-						"newStart":  1,
-						"newLines":  2,
-						"lines":     []any{"-old", "+new", "+new"},
+						"oldStart": 1,
+						"oldLines": 1,
+						"newStart": 1,
+						"newLines": 2,
+						"lines":    []any{"-old", "+new", "+new"},
 					},
 				},
 				"originalFile": "huge content we want to drop",
@@ -105,7 +198,7 @@ func TestBashErrorStatus(t *testing.T) {
 	pre := hookEventFromPayload(t, "PreToolUse", "s1", "e1", "tu-2",
 		time.Date(2026, 6, 30, 12, 0, 0, 0, time.UTC),
 		map[string]any{
-			"tool_name":  "Bash",
+			"tool_name":   "Bash",
 			"tool_use_id": "tu-2",
 			"tool_input": map[string]any{
 				"command":     "false",
@@ -116,13 +209,13 @@ func TestBashErrorStatus(t *testing.T) {
 	post := hookEventFromPayload(t, "PostToolUse", "s1", "e2", "tu-2",
 		time.Date(2026, 6, 30, 12, 0, 0, 5_000_000, time.UTC),
 		map[string]any{
-			"tool_name":  "Bash",
+			"tool_name":   "Bash",
 			"tool_use_id": "tu-2",
 			"tool_response": map[string]any{
-				"stdout":     "",
-				"stderr":     "boom",
+				"stdout":      "",
+				"stderr":      "boom",
 				"interrupted": false,
-				"exitCode":   1,
+				"exitCode":    1,
 			},
 		},
 	)
@@ -142,7 +235,7 @@ func TestPendingTool(t *testing.T) {
 	pre := hookEventFromPayload(t, "PreToolUse", "s1", "e1", "tu-3",
 		time.Date(2026, 6, 30, 12, 0, 0, 0, time.UTC),
 		map[string]any{
-			"tool_name":  "Read",
+			"tool_name":   "Read",
 			"tool_use_id": "tu-3",
 			"tool_input": map[string]any{
 				"file_path": "/home/user/proj/main.go",
@@ -210,9 +303,9 @@ func TestReadSummary(t *testing.T) {
 	pre := hookEventFromPayload(t, "PreToolUse", "s1", "e1", "tu-4",
 		time.Date(2026, 6, 30, 12, 0, 0, 0, time.UTC),
 		map[string]any{
-			"tool_name":  "Read",
+			"tool_name":   "Read",
 			"tool_use_id": "tu-4",
-			"cwd":        "/home/user/proj",
+			"cwd":         "/home/user/proj",
 			"tool_input": map[string]any{
 				"file_path": "/home/user/proj/README.md",
 				"offset":    0, // 0-based
@@ -223,7 +316,7 @@ func TestReadSummary(t *testing.T) {
 	post := hookEventFromPayload(t, "PostToolUse", "s1", "e2", "tu-4",
 		time.Date(2026, 6, 30, 12, 0, 0, 13_000_000, time.UTC),
 		map[string]any{
-			"tool_name":  "Read",
+			"tool_name":   "Read",
 			"tool_use_id": "tu-4",
 			"tool_response": map[string]any{
 				"filePath":   "/home/user/proj/README.md",
@@ -247,9 +340,9 @@ func TestReadSummaryNestedFile(t *testing.T) {
 	pre := hookEventFromPayload(t, "PreToolUse", "s1", "e1", "tu-9",
 		time.Date(2026, 6, 30, 12, 0, 0, 0, time.UTC),
 		map[string]any{
-			"tool_name":  "Read",
+			"tool_name":   "Read",
 			"tool_use_id": "tu-9",
-			"cwd":        "/home/user/proj",
+			"cwd":         "/home/user/proj",
 			"tool_input": map[string]any{
 				"file_path": "/home/user/proj/README.md",
 				"offset":    0, // 0-based
@@ -260,7 +353,7 @@ func TestReadSummaryNestedFile(t *testing.T) {
 	post := hookEventFromPayload(t, "PostToolUse", "s1", "e2", "tu-9",
 		time.Date(2026, 6, 30, 12, 0, 0, 13_000_000, time.UTC),
 		map[string]any{
-			"tool_name":  "Read",
+			"tool_name":   "Read",
 			"tool_use_id": "tu-9",
 			"tool_response": map[string]any{
 				"file": map[string]any{
@@ -490,9 +583,9 @@ func TestReadOneLinerLineRangeOffsetZero(t *testing.T) {
 	pre := hookEventFromPayload(t, "PreToolUse", "s1", "pre1", "tu-1",
 		time.Date(2026, 6, 30, 10, 0, 0, 0, time.UTC),
 		map[string]any{
-			"tool_name":  "Read",
+			"tool_name":   "Read",
 			"tool_use_id": "tu-1",
-			"cwd":        "/proj",
+			"cwd":         "/proj",
 			"tool_input": map[string]any{
 				"file_path": "/proj/main.go",
 				"limit":     100,
@@ -502,7 +595,7 @@ func TestReadOneLinerLineRangeOffsetZero(t *testing.T) {
 	post := hookEventFromPayload(t, "PostToolUse", "s1", "post1", "tu-1",
 		time.Date(2026, 6, 30, 10, 0, 0, 50_000_000, time.UTC),
 		map[string]any{
-			"tool_name":  "Read",
+			"tool_name":   "Read",
 			"tool_use_id": "tu-1",
 			"tool_response": map[string]any{
 				"file": map[string]any{
@@ -525,9 +618,9 @@ func TestReadOneLinerLineRangeOffset(t *testing.T) {
 	pre := hookEventFromPayload(t, "PreToolUse", "s1", "pre1", "tu-1",
 		time.Date(2026, 6, 30, 10, 0, 0, 0, time.UTC),
 		map[string]any{
-			"tool_name":  "Read",
+			"tool_name":   "Read",
 			"tool_use_id": "tu-1",
-			"cwd":        "/proj",
+			"cwd":         "/proj",
 			"tool_input": map[string]any{
 				"file_path": "/proj/main.go",
 				"offset":    10,
@@ -538,7 +631,7 @@ func TestReadOneLinerLineRangeOffset(t *testing.T) {
 	post := hookEventFromPayload(t, "PostToolUse", "s1", "post1", "tu-1",
 		time.Date(2026, 6, 30, 10, 0, 0, 50_000_000, time.UTC),
 		map[string]any{
-			"tool_name":  "Read",
+			"tool_name":   "Read",
 			"tool_use_id": "tu-1",
 			"tool_response": map[string]any{
 				"file": map[string]any{

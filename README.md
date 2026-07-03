@@ -46,6 +46,16 @@ The UI displays hook events grouped by session with three levels of detail:
    permission mode and effort chips.
 3. **Raw JSON drawer** — full original payload, searchable, copy-to-clipboard.
 
+Codex tool rows also show a context-window bar. Traceframe reads the
+`token_count` snapshots from the Codex transcript named by each hook's
+`transcript_path`; Docker Compose mounts both `~/.codex/sessions` and
+`~/.claude/projects` read-only for this purpose. Set
+`TRACEFRAME_TRANSCRIPT_ROOT` or `TRACEFRAME_CLAUDE_TRANSCRIPT_ROOT` when the
+transcripts live elsewhere. Claude usage defaults to a 200,000-token window;
+Opus 4.8 sessions are derived as 1,000,000 tokens from the transcript model.
+Override the fallback for other models with `TRACEFRAME_CLAUDE_CONTEXT_WINDOW`
+when needed.
+
 Pre/Post tool events are paired on the server by `tool_use_id`, collapsing the
 raw event stream into a single timeline entry per tool call. Sessions are
 shown in chronological order (oldest first) and the "All sessions" view keeps

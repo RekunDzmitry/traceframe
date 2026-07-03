@@ -358,6 +358,36 @@
         cursor: pointer;
         background: var(--panel);
         transition: background 80ms ease;
+        position: relative;
+      }
+      .row.has-context {
+        padding-top: 29px;
+      }
+      .context-meter {
+        position: absolute;
+        inset: 0 0 auto;
+        height: 18px;
+        background: #edf3f1;
+        border-bottom: 1px solid #dce8e5;
+        overflow: hidden;
+        pointer-events: none;
+      }
+      .context-meter-fill {
+        position: absolute;
+        inset: 0 auto 0 0;
+        width: var(--context-percent, 0%);
+        background: var(--context-color, #5bb5aa);
+        opacity: 0.32;
+      }
+      .context-meter-label {
+        position: absolute;
+        inset: 1px 9px auto auto;
+        color: #3f5f5b;
+        font-size: 10px;
+        font-weight: 750;
+        font-variant-numeric: tabular-nums;
+        line-height: 15px;
+        white-space: nowrap;
       }
       .row:hover {
         background: var(--panel-alt);
@@ -997,11 +1027,11 @@
       //
       // Tiny in-page test runner used by the headless browser smoke test.
       // Assertions are written to <div id="__tests"> so they can be scraped
-      // and asserted on in CI. Disable with ?notests=1.
+      // and asserted on in CI. Enable with ?tests=1.
 
       function runSelfTests() {
         const url = new URL(window.location.href);
-        if (url.searchParams.get("notests") === "1") return;
+        if (url.searchParams.get("tests") !== "1") return;
         const out = document.createElement("div");
         out.id = "__tests";
         out.style.cssText = "position:fixed;bottom:0;left:0;background:#fff;color:#000;font:12px monospace;padding:6px;z-index:9999;max-width:100%;white-space:pre;";
@@ -1441,6 +1471,24 @@
         row.setAttribute("role", "button");
         row.setAttribute("tabindex", "0");
 
+        const context = contextFor(ev);
+        if (context) {
+          row.classList.add("has-context");
+          row.style.setProperty("--context-percent", `${context.percent}%`);
+          row.style.setProperty("--context-color", context.color);
+          const meter = document.createElement("span");
+          meter.className = "context-meter";
+          meter.setAttribute("aria-hidden", "true");
+          const fill = document.createElement("span");
+          fill.className = "context-meter-fill";
+          const label = document.createElement("span");
+          label.className = "context-meter-label";
+          label.textContent = `Context ${formatTokenCount(ev.context_tokens)} / ${formatTokenCount(ev.context_window)} · ${Math.round(context.percent)}%`;
+          meter.append(fill, label);
+          row.appendChild(meter);
+          row.setAttribute("aria-label", `${label.textContent}. ${summaryFor(ev)}`);
+        }
+
         row.addEventListener("click", (e) => {
           if (e.target.closest(".btn")) return;
           toggleExpand(ev.event_id);
@@ -1512,6 +1560,22 @@
 
         row.append(icon, main, side);
         return row;
+      }
+
+      function contextFor(ev) {
+        const used = Number(ev.context_tokens);
+        const total = Number(ev.context_window);
+        if (!Number.isFinite(used) || !Number.isFinite(total) || used <= 0 || total <= 0) return null;
+        const percent = Math.min(100, Math.max(0, (used / total) * 100));
+        const color = percent >= 85 ? "#cf4352" : percent >= 65 ? "#d99b2b" : "#45a69a";
+        return { percent, color };
+      }
+
+      function formatTokenCount(value) {
+        const count = Number(value);
+        if (count >= 1_000_000) return `${(count / 1_000_000).toFixed(1)}m`;
+        if (count >= 1_000) return `${(count / 1_000).toFixed(1)}k`;
+        return String(Math.round(count));
       }
 
       function summaryFor(ev) {
