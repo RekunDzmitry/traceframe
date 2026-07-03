@@ -1,0 +1,5 @@
+{
+  "extensions": ["../hooks/pi/traceframe.ts"],
+  "transport": "sse",
+  "httpIdleTimeoutMs": 600000
+}

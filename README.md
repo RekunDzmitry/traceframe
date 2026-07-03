@@ -394,4 +394,23 @@ The extension never blocks Pi. Every POST is fire-and-forget; a missing or
 slow Traceframe server cannot stall the agent, and a network error is
 silently swallowed (or logged when `TRACEFRAME_DEBUG=1`).
 
+### Project-local config (this repo)
+
+The traceframe repo ships its own project-local Pi config at
+[.pi/settings.json](./.pi/settings.json) so `pi` picks up the extension
+and streaming settings automatically when run here. Three things are set:
+
+- **`extensions: ["../hooks/pi/traceframe.ts"]`** — auto-loads the
+  extension. The canonical source is `hooks/pi/traceframe.ts`; the project
+  config just points at it, no copy or symlink required.
+- **`transport: "sse"`** — forces SSE for LLM provider streaming
+  (overrides `auto` so the same transport is used across providers).
+- **`httpIdleTimeoutMs: 600000`** — 10 min, double the 5 min default, to
+  keep long agent runs from being cut off on slow reasoning pauses.
+
+The first time you start `pi` in this directory it will ask whether to
+trust the project. Answer yes (or `/trust` once after startup) and the
+config takes effect on every subsequent run. See [.pi/README.md](./.pi/README.md)
+for the rationale.
+
 Reference: https://github.com/earendil-works/pi-coding-agent/blob/main/docs/extensions.md
