@@ -1225,17 +1225,15 @@
       setInterval(loadHooks, REFRESH_MS);
 
       // ---------- Self-tests ----------
+      //
       // Tiny in-page test runner used by the headless browser smoke test.
-      // Assertions are written to <div id="__tests"> so they can be scraped
-      // and asserted on in CI. Disable with ?notests=1.
+      // Results are stashed on `window.__traceframeTests` so the headless
+      // runner can scrape them via `page.evaluate`; nothing is injected
+      // into the visible DOM. Disable with ?notests=1.
 
       function runSelfTests() {
         const url = new URL(window.location.href);
         if (url.searchParams.get("notests") === "1") return;
-        const out = document.createElement("div");
-        out.id = "__tests";
-        out.style.cssText = "position:fixed;bottom:0;left:0;background:#fff;color:#000;font:12px monospace;padding:6px;z-index:9999;max-width:100%;white-space:pre;";
-        document.body.appendChild(out);
         const results = [];
         const t = (name, cond, detail) => {
           results.push(`${cond ? "PASS" : "FAIL"} ${name}${detail ? " — " + detail : ""}`);
@@ -1305,8 +1303,10 @@
           );
         }
 
-        out.textContent = results.join("\n");
-        out.dataset.summary = results.every((r) => r.startsWith("PASS")) ? "ok" : "fail";
+        window.__traceframeTests = {
+          summary: results.every((r) => r.startsWith("PASS")) ? "ok" : "fail",
+          lines: results,
+        };
       }
 
       // Run after a beat so the initial render and filter wiring have settled.
