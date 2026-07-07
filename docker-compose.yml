@@ -18,6 +18,7 @@ services:
 
   app:
     build: .
+    image: traceframe-app:feat-context-blocks-ui
     container_name: traceframe-app
     restart: unless-stopped
     environment:
