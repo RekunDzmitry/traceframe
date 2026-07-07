@@ -21,14 +21,21 @@ import (
 	"time"
 )
 
-//go:embed static/index.html
+//go:embed static/index.html static/context.js
 var staticFiles embed.FS
 
-var indexHTML []byte
+var (
+	indexHTML []byte
+	contextJS []byte
+)
 
 func init() {
 	var err error
 	indexHTML, err = staticFiles.ReadFile("static/index.html")
+	if err != nil {
+		panic(err)
+	}
+	contextJS, err = staticFiles.ReadFile("static/context.js")
 	if err != nil {
 		panic(err)
 	}
@@ -154,6 +161,7 @@ func main() {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", s.handleIndex)
+	mux.HandleFunc("/context.js", s.handleContextJS)
 	mux.HandleFunc("/healthz", s.handleHealth)
 	mux.HandleFunc("/api/hooks", s.handleHooksCollection)
 	mux.HandleFunc("/api/hooks/", s.handleHookByID)
@@ -171,6 +179,12 @@ func main() {
 func (s *server) handleIndex(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("content-type", "text/html; charset=utf-8")
 	_, _ = w.Write(indexHTML)
+}
+
+func (s *server) handleContextJS(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("content-type", "application/javascript; charset=utf-8")
+	w.Header().Set("cache-control", "no-cache")
+	_, _ = w.Write(contextJS)
 }
 
 func (s *server) handleHealth(w http.ResponseWriter, r *http.Request) {

@@ -38,7 +38,28 @@ curl -X DELETE http://localhost:4000/api/sessions/demo-session
 curl http://localhost:4000/healthz
 ```
 
-The UI displays hook events grouped by session with three levels of detail:
+For the per-session view there are two modes, switched by the toggle in the
+header:
+
+1. **Context view (default)** — the session's `context`, not its chatter. The
+   per-session payload is grouped into logical blocks: `Session` (provider,
+   timing, totals), `Instructions` (first prompt, permission mode, effort),
+   `Tools available` (every tool the agent called, with call counts),
+   `Files (cache)` (deduped Read/Edit/Write targets with last-touched and
+   operation kinds), `Commands` (Bash history with exit status), `Searches`
+   (Grep/Glob), `Skills`, `Turns` (prompt + tool calls + assistant),
+   `Notes` (notifications, permission requests), and `Compacts`. Each item
+   is age-stamped; the colour follows a 3-bucket staleness signal
+   (`fresh` / `warm` / `cold`) tuned per block kind. Hover any item for
+   the full timestamp, age, and a one-line note about what the staleness
+   actually means. The age is a *freshness* signal, not a provider cache
+   TTL — the tooltip calls this out so the meaning is not lost.
+2. **Timeline view** — the chronological feed: prompt → tool calls →
+   assistant reply, one entry per turn. Filter by kind/tool/failure/duration
+   or grep the file path. Click a row to expand input/output, "View raw"
+   for the full JSON payload.
+
+Underneath both views, rows expose three levels of detail:
 
 1. **Compact row** — one-line summary, tool name, status, and duration.
 2. **Expanded details** — tool input/output, Edit diff, Read line range, Bash

@@ -824,16 +824,221 @@
           width: 100vw;
         }
       }
+
+      /* ---------- Context blocks view ---------- */
+      .ctx-toolbar {
+        border-bottom: 1px solid var(--border-soft);
+        padding: 10px 18px;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+      .ctx-toolbar .status {
+        flex: 1;
+      }
+      .ctx-toolbar .view-toggle {
+        display: inline-flex;
+        align-items: center;
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        overflow: hidden;
+      }
+      .ctx-toolbar .view-toggle button {
+        border: none;
+        background: var(--panel);
+        color: var(--muted);
+        font-size: 12px;
+        font-weight: 700;
+        padding: 6px 10px;
+        cursor: pointer;
+      }
+      .ctx-toolbar .view-toggle button.active {
+        background: var(--accent);
+        color: white;
+      }
+
+      .ctx-stack {
+        list-style: none;
+        margin: 0;
+        padding: 16px 18px 32px;
+        display: grid;
+        gap: 12px;
+      }
+
+      .ctx-block {
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-left: 4px solid var(--muted);
+        border-radius: 10px;
+        box-shadow: var(--shadow);
+        overflow: hidden;
+      }
+      .ctx-block--session { border-left-color: #202124; }
+      .ctx-block--instructions { border-left-color: #6b6f76; }
+      .ctx-block--tools { border-left-color: #0f766e; }
+      .ctx-block--files { border-left-color: #1f6feb; }
+      .ctx-block--commands { border-left-color: #953800; }
+      .ctx-block--searches { border-left-color: #8250df; }
+      .ctx-block--skills { border-left-color: #b35900; }
+      .ctx-block--turns { border-left-color: #1a7f37; }
+      .ctx-block--compacts { border-left-color: #9a6700; }
+      .ctx-block--notes { border-left-color: #b31d28; }
+
+      .ctx-block__header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 10px 14px;
+        border-bottom: 1px solid var(--border-soft);
+        background: var(--panel-alt);
+      }
+      .ctx-block__title {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        font-weight: 800;
+        font-size: 14px;
+      }
+      .ctx-block__icon {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 22px;
+        height: 22px;
+        border-radius: 50%;
+        background: var(--panel);
+        border: 1px solid var(--border-soft);
+        font-size: 12px;
+        color: var(--muted);
+      }
+      .ctx-block__count {
+        background: #ecebe4;
+        color: #3f4247;
+        border-radius: 999px;
+        font-size: 11px;
+        font-weight: 800;
+        min-width: 22px;
+        padding: 1px 8px;
+        text-align: center;
+      }
+      .ctx-block__meta {
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
+        color: var(--muted);
+        font-size: 12px;
+      }
+      .ctx-block__subtitle {
+        color: var(--muted);
+      }
+      .ctx-block__age {
+        font-variant-numeric: tabular-nums;
+      }
+
+      .ctx-block__body {
+        padding: 4px 0 8px;
+      }
+      .ctx-block__empty {
+        padding: 12px 16px 14px;
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      .ctx-item-list {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+      }
+      .ctx-item-list .ctx-item + .ctx-item {
+        border-top: 1px solid var(--border-soft);
+      }
+
+      .ctx-item__main {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 12px;
+        align-items: center;
+        width: 100%;
+        text-align: left;
+        background: transparent;
+        border: none;
+        cursor: pointer;
+        padding: 8px 14px;
+        font: inherit;
+        color: inherit;
+      }
+      .ctx-item__main:disabled {
+        cursor: default;
+      }
+      .ctx-item__main:not(:disabled):hover {
+        background: #f4f7f6;
+      }
+      .ctx-item__title {
+        font-size: 13.5px;
+        font-weight: 650;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .ctx-item__subtitle {
+        display: block;
+        color: var(--muted);
+        font-size: 12px;
+        font-weight: 500;
+        margin-top: 2px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .ctx-item__side {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .ctx-item__arrow {
+        color: var(--muted);
+        font-size: 14px;
+      }
+
+      /* Staleness tones for chips and block borders. */
+      .chip.tone-fresh { background: #e6ffec; color: var(--success); }
+      .chip.tone-warm  { background: var(--warning-bg); color: var(--warning); }
+      .chip.tone-cold  { background: #ffebe9; color: var(--error); }
+
+      /* Custom tooltip for context items. We avoid the title attribute's
+         plain-text default and show a styled panel on hover. */
+      .ctx-tooltip {
+        position: fixed;
+        z-index: 60;
+        max-width: 360px;
+        background: #202124;
+        color: #f3f3f3;
+        border-radius: 8px;
+        padding: 10px 12px;
+        font-size: 12px;
+        line-height: 1.45;
+        white-space: pre-wrap;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25);
+        pointer-events: none;
+        opacity: 0;
+        transform: translateY(4px);
+        transition: opacity 80ms ease, transform 80ms ease;
+      }
+      .ctx-tooltip.visible {
+        opacity: 1;
+        transform: translateY(0);
+      }
     </style>
   </head>
   <body>
     <main>
       <header class="app-header">
-        <div>
-          <h1>Traceframe Hooks</h1>
+          <h1>Traceframe Context</h1>
           <p class="subtitle">
-            Hook events grouped by session. Click a row to expand, then
-            <em>View raw</em> for the full payload.
+            What the agent holds in context right now — files, tools, skills.
+            Hover any item for the freshness / TTL details.
           </p>
         </div>
         <button class="refresh" type="button" id="refresh">Refresh</button>
@@ -851,6 +1056,10 @@
               <div class="events-title" id="events-title">All sessions</div>
               <div class="events-actions">
                 <div class="status" id="status">Loading hooks...</div>
+                <div class="view-toggle" id="view-toggle" hidden>
+                  <button type="button" id="view-context" class="active">Context</button>
+                  <button type="button" id="view-timeline">Timeline</button>
+                </div>
                 <button class="delete-session" type="button" id="delete-session" hidden>
                   Delete session
                 </button>
@@ -893,10 +1102,10 @@
             </div>
             <button class="filter-clear" type="button" id="filter-clear">Clear filters</button>
           </div>
+          <div class="ctx-stack" id="context-view" hidden></div>
           <ul class="timeline" id="timeline"></ul>
           <div class="empty" id="empty" hidden>No hook events yet.</div>
         </section>
-      </section>
     </main>
 
     <div class="scrim" id="scrim"></div>
@@ -922,14 +1131,15 @@
       </div>
     </aside>
 
-    <script>
-      "use strict";
+    <div class="ctx-tooltip" id="ctx-tooltip" role="tooltip" aria-hidden="true"></div>
 
-      // ---------- State ----------
+    <script src="context.js"></script>
+    <script>
 
       const state = {
         hooks: [],
         selectedSession: "all",
+        sessionView: "context", // "context" | "timeline"
         timeline: null,
         rawPayload: new Map(), // event_id -> payload
         expanded: new Set(), // event_ids currently expanded
@@ -953,6 +1163,7 @@
 
       const sessionsEl = $("#sessions");
       const timelineEl = $("#timeline");
+      const contextEl = $("#context-view");
       const statusEl = $("#status");
       const emptyEl = $("#empty");
       const titleEl = $("#events-title");
@@ -969,7 +1180,10 @@
       const drawerSearchEl = $("#drawer-search");
       const drawerCopyEl = $("#drawer-copy");
       const drawerCloseEl = $("#drawer-close");
-
+      const viewToggleEl = $("#view-toggle");
+      const viewContextBtn = $("#view-context");
+      const viewTimelineBtn = $("#view-timeline");
+      const tooltipEl = $("#ctx-tooltip");
       // ---------- Boot ----------
 
       refreshEl.addEventListener("click", () => loadHooks());
@@ -984,17 +1198,33 @@
         state.searchTerm = drawerSearchEl.value.trim();
         renderDrawerBody();
       });
-      document.addEventListener("keydown", (e) => {
-        if (e.key === "Escape" && state.drawerEventId) {
-          closeDrawer();
-        }
+      // View toggle (Context vs Timeline) is per-session.
+      viewContextBtn.addEventListener("click", () => setSessionView("context"));
+      viewTimelineBtn.addEventListener("click", () => setSessionView("timeline"));
+      // Custom tooltip for context items. We avoid the native title popup
+      // (timing is OS-controlled, styling is locked) and show our own.
+      contextEl.addEventListener("mouseover", (e) => {
+        const t = e.target.closest("[data-tooltip]");
+        if (!t) return;
+        showTooltip(t.dataset.tooltip, e);
+      });
+      contextEl.addEventListener("mousemove", (e) => {
+        if (!tooltipEl.classList.contains("visible")) return;
+        positionTooltip(e);
+      });
+      contextEl.addEventListener("mouseout", (e) => {
+        const t = e.target.closest("[data-tooltip]");
+        if (!t) return;
+        // Only hide if we're really leaving the tooltip'd element.
+        if (e.relatedTarget && t.contains(e.relatedTarget)) return;
+        hideTooltip();
       });
 
+      // ---------- Boot ----------
       loadHooks();
       setInterval(loadHooks, REFRESH_MS);
 
       // ---------- Self-tests ----------
-      //
       // Tiny in-page test runner used by the headless browser smoke test.
       // Assertions are written to <div id="__tests"> so they can be scraped
       // and asserted on in CI. Disable with ?notests=1.
@@ -1047,6 +1277,33 @@
           state.filters.tool === "Read" && $("#filter-tool").value === "Read",
           `tool=${state.filters.tool}, dropdown=${$("#filter-tool").value}`,
         );
+        // context.js aggregator + staleness semantics.
+        if (window.Traceframe && window.Traceframe.context) {
+          const cx = window.Traceframe.context;
+          for (const r of cx.runTests()) {
+            const ok = r.startsWith("PASS");
+            const name = r.replace(/^(PASS|FAIL) /, "");
+            t("context: " + name, ok, r);
+          }
+        } else {
+          t("context.js loaded", false, "window.Traceframe.context missing");
+        }
+
+        // Verifies the per-session view shows the context blocks and the
+        // view toggle is visible.
+        if (state.selectedSession !== "all" && state.timeline) {
+          renderSessionView();
+          t(
+            "context view is visible for selected session",
+            !contextEl.hidden && timelineEl.hidden,
+            `contextEl.hidden=${contextEl.hidden} timelineEl.hidden=${timelineEl.hidden}`,
+          );
+          t(
+            "view toggle is visible for selected session",
+            !viewToggleEl.hidden,
+            `viewToggleEl.hidden=${viewToggleEl.hidden}`,
+          );
+        }
 
         out.textContent = results.join("\n");
         out.dataset.summary = results.every((r) => r.startsWith("PASS")) ? "ok" : "fail";
@@ -1108,9 +1365,7 @@
         if (state.rawPayload.has(eventId)) {
           return state.rawPayload.get(eventId);
         }
-        const response = await fetch(
-          `/api/hooks/${encodeURIComponent(eventId)}`,
-        );
+        const response = await fetch(`/api/hooks/${encodeURIComponent(eventId)}`);
         if (!response.ok) {
           throw new Error(`HTTP ${response.status}`);
         }
@@ -1119,6 +1374,47 @@
         return data;
       }
 
+      // ---------- View mode helpers ----------
+
+      function setSessionView(mode) {
+        if (mode !== "context" && mode !== "timeline") return;
+        if (state.sessionView === mode) return;
+        state.sessionView = mode;
+        if (state.selectedSession !== "all") {
+          renderSessionView();
+        }
+      }
+
+      function showTooltip(text) {
+        if (!text) {
+          hideTooltip();
+          return;
+        }
+        tooltipEl.textContent = text;
+        tooltipEl.classList.add("visible");
+        tooltipEl.setAttribute("aria-hidden", "false");
+      }
+
+      function positionTooltip(e) {
+        const pad = 14;
+        const w = tooltipEl.offsetWidth || 320;
+        const h = tooltipEl.offsetHeight || 80;
+        const vw = window.innerWidth;
+        const vh = window.innerHeight;
+        let left = e.clientX + pad;
+        let top = e.clientY + pad;
+        if (left + w > vw) left = e.clientX - w - pad;
+        if (top + h > vh) top = e.clientY - h - pad;
+        if (left < 4) left = 4;
+        if (top < 4) top = 4;
+        tooltipEl.style.left = left + "px";
+        tooltipEl.style.top = top + "px";
+      }
+
+      function hideTooltip() {
+        tooltipEl.classList.remove("visible");
+        tooltipEl.setAttribute("aria-hidden", "true");
+      }
       // ---------- Render: sessions sidebar ----------
 
       function render() {
@@ -1253,6 +1549,10 @@
       function renderAllView(sessions) {
         titleEl.textContent = "All sessions";
         deleteEl.hidden = true;
+        viewToggleEl.hidden = true;
+        contextEl.hidden = true;
+        contextEl.textContent = "";
+        timelineEl.hidden = false;
         sessionStatsEl.hidden = true;
         filtersEl.hidden = state.hooks.length === 0;
         populateToolFilter(state.hooks);
@@ -1274,13 +1574,44 @@
       function renderSessionView() {
         const tl = state.timeline;
         if (!tl) {
+          contextEl.textContent = "";
           timelineEl.textContent = "";
           emptyEl.hidden = false;
+          emptyEl.textContent = "Loading session...";
           return;
         }
         const session = tl.session || {};
         titleEl.textContent = session.name || "Session";
         deleteEl.hidden = false;
+        viewToggleEl.hidden = false;
+        viewContextBtn.classList.toggle("active", state.sessionView === "context");
+        viewTimelineBtn.classList.toggle("active", state.sessionView === "timeline");
+
+        if (state.sessionView === "context") {
+          // Context view: logical blocks, no filters, no per-turn render.
+          timelineEl.hidden = true;
+          timelineEl.textContent = "";
+          filtersEl.hidden = true;
+          sessionStatsEl.hidden = true;
+          contextEl.hidden = false;
+          emptyEl.hidden = true;
+          const blocks = window.Traceframe.context.buildContextBlocks(tl, state.hooks);
+          window.Traceframe.context.renderContextView(blocks.blocks, contextEl, {
+            onItemClick: (item) => {
+              if (item && item.event_id) openDrawer(item.event_id);
+            },
+            onRawClick: (eventIds) => {
+              if (eventIds && eventIds.length) openDrawer(eventIds[0]);
+            },
+          });
+          return;
+        }
+
+        // Timeline view: the original per-turn render. Filters and stats
+        // were designed for this; reusing them keeps parity with the old UX.
+        contextEl.hidden = true;
+        contextEl.textContent = "";
+        timelineEl.hidden = false;
         sessionStatsEl.hidden = false;
         renderSessionStats(session);
         filtersEl.hidden = false;
