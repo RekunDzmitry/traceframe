@@ -322,6 +322,15 @@ func (s *server) handleSessionRoute(w http.ResponseWriter, r *http.Request) {
 		s.serveSessionTimeline(w, r, sessionID)
 		return
 	}
+	if len(parts) == 2 && parts[1] == "hooks" {
+		if r.Method != http.MethodGet {
+			w.Header().Set("allow", http.MethodGet)
+			writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"error": "method not allowed"})
+			return
+		}
+		s.serveSessionHooks(w, r, sessionID)
+		return
+	}
 
 	if r.Method == http.MethodDelete {
 		s.deleteSession(w, r, sessionID)
@@ -360,6 +369,32 @@ func (s *server) listHooks(w http.ResponseWriter, r *http.Request) {
 	}
 	summaries := buildSummaries(events)
 	writeJSON(w, http.StatusOK, map[string]any{"hooks": summaries})
+}
+
+// serveSessionHooks returns every hook row for one session in chronological
+// order (oldest first). The Context Usage Map aggregator reads from this
+// instead of the global /api/hooks list (which is capped at 300 newest and
+// can silently omit the SessionStart/system prompt/tool definitions for
+// long-running sessions). The timeline endpoint at
+// /api/sessions/{id}/timeline wraps the same query in a turn-grouped view;
+// this raw form is what the aggregator wants.
+func (s *server) serveSessionHooks(w http.ResponseWriter, r *http.Request, sessionID string) {
+	query := fmt.Sprintf(`
+		SELECT %s
+		FROM claude_hooks
+		WHERE session_id = {session_id:String}
+		ORDER BY event_time ASC
+		LIMIT 5000
+		FORMAT JSONEachRow
+	`, hookRowProjection)
+	params := url.Values{"param_session_id": []string{sessionID}}
+	events, err := s.loadEvents(r.Context(), query, params)
+	if err != nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "query failed", "detail": err.Error()})
+		return
+	}
+	summaries := buildSummaries(events)
+	writeJSON(w, http.StatusOK, map[string]any{"hooks": summaries, "session_id": sessionID})
 }
 
 func (s *server) serveHookDetail(w http.ResponseWriter, r *http.Request, eventID string) {

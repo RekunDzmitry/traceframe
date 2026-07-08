@@ -1288,6 +1288,12 @@
 
       const state = {
         hooks: [],
+        // session_id -> array of every hook for that session (ASC by
+        // event_time). Used by the Context Usage Map so it sees the full
+        // session, not just the newest 300 from the global /api/hooks
+        // list (which can drop the SessionStart / system_prompt /
+        // system_tools for long-running sessions).
+        sessionHooks: new Map(),
         selectedSession: "all",
         sessionView: "context", // "context" | "timeline"
         timeline: null,
@@ -1523,6 +1529,47 @@
           statusEl.classList.add("error");
           return null;
         }
+      }async function loadTimeline(sessionId) {
+        try {
+          const response = await fetch(
+            `/api/sessions/${encodeURIComponent(sessionId)}/timeline`,
+          );
+          if (!response.ok) {
+            const body = await response.json().catch(() => ({}));
+            throw new Error(body.detail || body.error || `HTTP ${response.status}`);
+          }
+          return await response.json();
+        } catch (error) {
+          statusEl.textContent = `Failed to load: ${error.message}`;
+          statusEl.classList.add("error");
+          return null;
+        }
+      }
+
+      async function loadSessionHooks(sessionId) {
+        try {
+          const response = await fetch(
+            `/api/sessions/${encodeURIComponent(sessionId)}/hooks`,
+          );
+          if (!response.ok) {
+            const body = await response.json().catch(() => ({}));
+            throw new Error(body.detail || body.error || `HTTP ${response.status}`);
+          }
+          const data = await response.json();
+          return Array.isArray(data.hooks) ? data.hooks : [];
+        } catch (error) {
+          statusEl.textContent = `Failed to load session hooks: ${error.message}`;
+          statusEl.classList.add("error");
+          return [];
+        }
+      }
+
+      async function ensureSessionHooksForSelected() {
+        const id = state.selectedSession;
+        if (!id || id === "all") return;
+        if (!state.sessionHooks.has(id)) {
+          state.sessionHooks.set(id, await loadSessionHooks(id));
+        }
       }
 
       async function loadRawPayload(eventId) {
@@ -1753,17 +1800,22 @@
 
         if (state.sessionView === "context") {
           // Context Usage Map: token grid + per-message blocks + per-category
-          // breakdown. Built from the timeline, the flat hook list, and the
-          // last assistant message's `usage` block. The aggregator is
-          // async (it pulls token counts from the CDN-loaded tokenizer),
-          // so we await it before rendering.
+          // breakdown. Built from the timeline and the session-scoped
+          // hook list (not the global /api/hooks, which is capped at 300
+          // newest and can drop the SessionStart / system_prompt for
+          // long-running sessions). The aggregator is async (it pulls
+          // token counts from the CDN-loaded tokenizer), so we await it
+          // before rendering.
           timelineEl.hidden = true;
           timelineEl.textContent = "";
           filtersEl.hidden = true;
           sessionStatsEl.hidden = true;
           contextEl.hidden = false;
           emptyEl.hidden = true;
-          const data = await window.Traceframe.context.buildContextUsageMap(tl, state.hooks);
+          await ensureSessionHooksForSelected();
+          const sessionId = tl.session && tl.session.id;
+          const sessionHooks = sessionId ? (state.sessionHooks.get(sessionId) || []) : [];
+          const data = await window.Traceframe.context.buildContextUsageMap(tl, sessionHooks);
           window.Traceframe.context.renderContextUsageMap(data, contextEl, {
             onItemClick: (block) => {
               if (!block) return;

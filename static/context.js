@@ -144,6 +144,14 @@
   /** Walk hooks for the most recent assistant record carrying `usage`.
    *  The pi extension forwards `usage` on Stop events; claude/codex may
    *  carry it on assistant events directly. */
+  /**
+   * Pick the most-recent usage block from the session's hooks. Hooks can
+   * arrive in either order — the global /api/hooks list is DESC
+   * (newest-first), while /api/sessions/{id}/hooks is ASC (oldest-first).
+   * Don't rely on either; find the assistant record with the latest
+   * `event_time` that carries a usage block. Returns the zero-valued usage
+   * sentinel when nothing carries one.
+   */
   function extractAPIUsage(hooks) {
     const usage = {
       input_tokens: 0,
@@ -153,25 +161,31 @@
       cache_creation: null,
       present: false,
     };
-    for (let i = (hooks || []).length - 1; i >= 0; i--) {
-      const h = hooks[i];
+    let latest = null;
+    let latestTime = -Infinity;
+    for (const h of hooks || []) {
       if (!h || typeof h !== "object") continue;
       const u = h.usage || (h.payload && typeof h.payload === "object" && h.payload.usage);
-      if (u && typeof u === "object") {
-        if (typeof u.input_tokens === "number") usage.input_tokens = u.input_tokens;
-        if (typeof u.output_tokens === "number") usage.output_tokens = u.output_tokens;
-        if (typeof u.cache_creation_input_tokens === "number") usage.cache_creation_input_tokens = u.cache_creation_input_tokens;
-        if (typeof u.cache_read_input_tokens === "number") usage.cache_read_input_tokens = u.cache_read_input_tokens;
-        if (u.cache_creation && typeof u.cache_creation === "object") {
-          usage.cache_creation = {
-            ephemeral_5m_input_tokens: typeof u.cache_creation.ephemeral_5m_input_tokens === "number" ? u.cache_creation.ephemeral_5m_input_tokens : 0,
-            ephemeral_1h_input_tokens: typeof u.cache_creation.ephemeral_1h_input_tokens === "number" ? u.cache_creation.ephemeral_1h_input_tokens : 0,
-          };
-        }
-        usage.present = true;
-        return usage;
+      if (!u || typeof u !== "object") continue;
+      const t = Date.parse(h.event_time || "");
+      if (!isFinite(t)) continue;
+      if (t > latestTime) {
+        latestTime = t;
+        latest = u;
       }
     }
+    if (!latest) return usage;
+    if (typeof latest.input_tokens === "number") usage.input_tokens = latest.input_tokens;
+    if (typeof latest.output_tokens === "number") usage.output_tokens = latest.output_tokens;
+    if (typeof latest.cache_creation_input_tokens === "number") usage.cache_creation_input_tokens = latest.cache_creation_input_tokens;
+    if (typeof latest.cache_read_input_tokens === "number") usage.cache_read_input_tokens = latest.cache_read_input_tokens;
+    if (latest.cache_creation && typeof latest.cache_creation === "object") {
+      usage.cache_creation = {
+        ephemeral_5m_input_tokens: typeof latest.cache_creation.ephemeral_5m_input_tokens === "number" ? latest.cache_creation.ephemeral_5m_input_tokens : 0,
+        ephemeral_1h_input_tokens: typeof latest.cache_creation.ephemeral_1h_input_tokens === "number" ? latest.cache_creation.ephemeral_1h_input_tokens : 0,
+      };
+    }
+    usage.present = true;
     return usage;
   }
 
