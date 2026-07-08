@@ -8,7 +8,8 @@ RUN go build -o /out/traceframe .
 
 FROM alpine:3.20
 
-RUN adduser -D -H app
+RUN adduser -D -H -h /app app
+ENV HOME=/app
 USER app
 WORKDIR /app
 COPY --from=build /out/traceframe /app/traceframe

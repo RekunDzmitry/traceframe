@@ -23,11 +23,10 @@
         --diff-add-text: #1a7f37;
         --diff-remove: #ffebe9;
         --diff-remove-text: #b35900;
-        --error: #b31d28;
-        --error-bg: #ffebe9;
-        --success: #1a7f37;
-        --warning: #9a6700;
         --warning-bg: #fff8c5;
+        --context-fill-opacity: 0.5;
+        --context-row-padding-top: 29px;
+        --context-meter-height: 18px;
       }
 
       * {
@@ -361,12 +360,12 @@
         position: relative;
       }
       .row.has-context {
-        padding-top: 29px;
+        padding-top: var(--context-row-padding-top);
       }
       .context-meter {
         position: absolute;
         inset: 0 0 auto;
-        height: 18px;
+        height: var(--context-meter-height);
         background: #edf3f1;
         border-bottom: 1px solid #dce8e5;
         overflow: hidden;
@@ -377,7 +376,7 @@
         inset: 0 auto 0 0;
         width: var(--context-percent, 0%);
         background: var(--context-color, #5bb5aa);
-        opacity: 0.32;
+        opacity: var(--context-fill-opacity);
       }
       .context-meter-label {
         position: absolute;
@@ -1471,6 +1470,10 @@
         row.setAttribute("role", "button");
         row.setAttribute("tabindex", "0");
 
+        // Compute the visible summary once so the row label and the title
+        // text below do not disagree (and so we only call summaryFor once).
+        const summaryText = summaryFor(ev);
+
         const context = contextFor(ev);
         if (context) {
           row.classList.add("has-context");
@@ -1486,7 +1489,7 @@
           label.textContent = `Context ${formatTokenCount(ev.context_tokens)} / ${formatTokenCount(ev.context_window)} · ${Math.round(context.percent)}%`;
           meter.append(fill, label);
           row.appendChild(meter);
-          row.setAttribute("aria-label", `${label.textContent}. ${summaryFor(ev)}`);
+          row.setAttribute("aria-label", `${label.textContent}. ${summaryText}`);
         }
 
         row.addEventListener("click", (e) => {
@@ -1530,7 +1533,7 @@
           tag.textContent = humanKind(ev.kind);
           title.appendChild(tag);
         }
-        const summaryText = summaryFor(ev);
+
         title.appendChild(document.createTextNode(summaryText));
         main.appendChild(title);
 

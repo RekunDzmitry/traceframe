@@ -778,6 +778,7 @@ func readContextSnapshots(rawPath string) []contextSnapshot {
 				Info struct {
 					LastTokenUsage struct {
 						InputTokens           int64 `json:"input_tokens"`
+						CachedInputTokens     int64 `json:"cached_input_tokens"`
 						OutputTokens          int64 `json:"output_tokens"`
 						ReasoningOutputTokens int64 `json:"reasoning_output_tokens"`
 						TotalTokens           int64 `json:"total_tokens"`
@@ -808,7 +809,10 @@ func readContextSnapshots(rawPath string) []contextSnapshot {
 			usage := entry.Payload.Info.LastTokenUsage
 			tokens := usage.TotalTokens
 			if tokens <= 0 {
-				tokens = usage.InputTokens + usage.OutputTokens + usage.ReasoningOutputTokens
+				// Fallback when total_tokens is unset; cached_input_tokens is
+				// included so a future Codex revision that omits total_tokens
+				// but populates the cache field is still counted accurately.
+				tokens = usage.InputTokens + usage.CachedInputTokens + usage.OutputTokens + usage.ReasoningOutputTokens
 			}
 			snapshot = contextSnapshot{
 				At:         at,
@@ -820,7 +824,7 @@ func readContextSnapshots(rawPath string) []contextSnapshot {
 			usage := entry.Message.Usage
 			snapshot = contextSnapshot{
 				At:     at,
-				Tokens: usage.InputTokens + usage.CacheCreationTokens + usage.CacheReadTokens + usage.OutputTokens,
+				Tokens: usage.InputTokens + usage.CacheCreationTokens + usage.CacheReadTokens,
 				Window: claudeContextWindow(entry.Message.Model),
 			}
 		}
@@ -843,11 +847,23 @@ func readContextSnapshots(rawPath string) []contextSnapshot {
 	return snapshots
 }
 
+// allowedTranscriptPath validates that rawPath is a `.jsonl` file inside one
+// of the configured transcript roots. Both the root and the path are
+// resolved with `filepath.Abs` + `EvalSymlinks` so symlinked transcripts are
+// compared against their real root. A root that fails to resolve to an
+// absolute path (e.g. when `os.UserHomeDir()` returns "" in a minimal
+// container and no env-var override is set) is treated as untrusted and
+// never grants access — this blocks the CWD-relative symlink escape where
+// an attacker plants `.codex/sessions` in the binary's working directory.
 func allowedTranscriptPath(rawPath string) (string, bool) {
 	home, _ := os.UserHomeDir()
+	defaults := []string{
+		filepath.Join(home, ".codex", "sessions"),
+		filepath.Join(home, ".claude", "projects"),
+	}
 	roots := []string{
-		firstNonEmpty(strings.TrimSpace(os.Getenv("TRACEFRAME_TRANSCRIPT_ROOT")), filepath.Join(home, ".codex", "sessions")),
-		firstNonEmpty(strings.TrimSpace(os.Getenv("TRACEFRAME_CLAUDE_TRANSCRIPT_ROOT")), filepath.Join(home, ".claude", "projects")),
+		firstNonEmpty(strings.TrimSpace(os.Getenv("TRACEFRAME_TRANSCRIPT_ROOT")), defaults[0]),
+		firstNonEmpty(strings.TrimSpace(os.Getenv("TRACEFRAME_CLAUDE_TRANSCRIPT_ROOT")), defaults[1]),
 	}
 	path, err := filepath.Abs(filepath.Clean(rawPath))
 	if err != nil {
@@ -861,11 +877,11 @@ func allowedTranscriptPath(rawPath string) (string, bool) {
 		return "", false
 	}
 	for _, rawRoot := range roots {
-		root, rootErr := filepath.Abs(rawRoot)
-		if rootErr != nil {
+		abs, rootErr := filepath.Abs(rawRoot)
+		if rootErr != nil || !filepath.IsAbs(abs) {
 			continue
 		}
-		root, rootErr = filepath.EvalSymlinks(root)
+		root, rootErr := filepath.EvalSymlinks(abs)
 		if rootErr != nil {
 			continue
 		}
@@ -877,9 +893,13 @@ func allowedTranscriptPath(rawPath string) (string, bool) {
 	return "", false
 }
 
+// claudeContextWindow returns the 1M-token context window for Claude Opus
+// 4.8 and falls back to TRACEFRAME_CLAUDE_CONTEXT_WINDOW (default 200_000)
+// for everything else. The Opus match is anchored so it does not pick up
+// hypothetical siblings like `claude-opus-4-80` or `claude-opus-4-8-preview`.
 func claudeContextWindow(model string) int64 {
 	normalized := strings.ToLower(strings.TrimSpace(model))
-	if strings.Contains(normalized, "claude-opus-4-8") {
+	if isClaudeOpus48(normalized) {
 		return 1_000_000
 	}
 	if configured := strings.TrimSpace(os.Getenv("TRACEFRAME_CLAUDE_CONTEXT_WINDOW")); configured != "" {
@@ -888,6 +908,28 @@ func claudeContextWindow(model string) int64 {
 		}
 	}
 	return 200_000
+}
+
+func isClaudeOpus48(normalized string) bool {
+	const prefix = "claude-opus-4-8"
+	if !strings.HasPrefix(normalized, prefix) {
+		return false
+	}
+	rest := normalized[len(prefix):]
+	if rest == "" {
+		return true
+	}
+	// Accept a date suffix (`claude-opus-4-8-YYYYMMDD`) and reject any
+	// other token continuation like `-preview`, `-80`, or `-next`.
+	if rest[0] != '-' {
+		return false
+	}
+	for _, c := range rest[1:] {
+		if c < '0' || c > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 func toolUseIDOf(e *hookEvent) string {
@@ -1051,11 +1093,10 @@ func buildToolSummary(pre, post *hookEvent) eventSummary {
 
 // buildToolOneLiner creates a single-line description for the compact row.
 // Examples:
-//
-//	"Edit static/index.html +3/-2"
-//	"Read README.md lines 1-120"
-//	"Bash Build application"
-//	"Write main.go 50 lines"
+//   "Edit static/index.html +3/-2"
+//   "Read README.md lines 1-120"
+//   "Bash Build application"
+//   "Write main.go 50 lines"
 func buildToolOneLiner(toolName string, input map[string]any, post *hookEvent, cwd string) string {
 	switch toolName {
 	case "Edit", "MultiEdit":

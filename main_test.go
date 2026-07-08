@@ -50,12 +50,135 @@ func TestContextUsageRejectsTranscriptOutsideConfiguredRoot(t *testing.T) {
 		t.Fatal(err)
 	}
 	event := hookEventFromPayload(t, "PreToolUse", "s1", "pre1", "tu-1", time.Date(2026, 7, 3, 10, 0, 1, 0, time.UTC), map[string]any{
-		"tool_name": "Read", "tool_use_id": "tu-1", "transcript_path": outside,
+		"tool_name":  "Read",
+		"tool_use_id": "tu-1",
+		"transcript_path": outside,
 	})
 
 	summaries := buildSummaries([]*hookEvent{event})
 	if summaries[0].ContextTokens != 0 || summaries[0].ContextWindow != 0 {
 		t.Fatalf("outside transcript was read: %+v", summaries[0])
+	}
+}
+
+func TestContextUsageRejectsSymlinkEscape(t *testing.T) {
+	// Build a structure where the configured root is a symlink that lands
+	// inside a directory the operator never granted access to.
+	root := t.TempDir()
+	t.Setenv("TRACEFRAME_TRANSCRIPT_ROOT", root)
+	outside := t.TempDir()
+	target := filepath.Join(outside, "leak.jsonl")
+	if err := os.WriteFile(target, []byte(`{"timestamp":"2026-07-03T10:00:02Z","payload":{"type":"token_count","info":{"last_token_usage":{"total_tokens":42},"model_context_window":1000}}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(root, "escape.jsonl")
+	if err := os.Symlink(target, link); err != nil {
+		t.Skipf("symlink unsupported: %v", err)
+	}
+	event := hookEventFromPayload(t, "PreToolUse", "s1", "pre1", "tu-1", time.Date(2026, 7, 3, 10, 0, 1, 0, time.UTC), map[string]any{
+		"tool_name":  "Read",
+		"tool_use_id": "tu-1",
+		"transcript_path": link,
+	})
+	summaries := buildSummaries([]*hookEvent{event})
+	if summaries[0].ContextTokens != 0 || summaries[0].ContextWindow != 0 {
+		t.Fatalf("symlink escape was read: %+v", summaries[0])
+	}
+}
+
+func TestContextUsageHandlesMalformedAndOversizedLines(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("TRACEFRAME_TRANSCRIPT_ROOT", root)
+	transcript := filepath.Join(root, "rollout-malformed.jsonl")
+	// 1MiB of spaces inside one "line" — well under the 64MiB scanner cap
+	// but well past any reasonable entry. The scanner should still surface
+	// the valid preceding line.
+	huge := strings.Repeat(" ", 1<<20)
+	contents := strings.Join([]string{
+		`{"timestamp":"2026-07-03T10:00:02.100Z","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":10,"output_tokens":1,"total_tokens":11},"model_context_window":1000}}}`,
+		`{not valid json` + huge,
+		`{"timestamp":"2026-07-03T10:00:04.000Z","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":20,"output_tokens":2,"total_tokens":22},"model_context_window":2000}}}`,
+	}, "\n")
+	if err := os.WriteFile(transcript, []byte(contents), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	event := hookEventFromPayload(t, "PreToolUse", "s1", "pre1", "tu-1", time.Date(2026, 7, 3, 10, 0, 1, 0, time.UTC), map[string]any{
+		"tool_name":  "Bash",
+		"tool_use_id": "tu-1",
+		"transcript_path": transcript,
+		"tool_input": map[string]any{"command": "git status"},
+	})
+	post := hookEventFromPayload(t, "PostToolUse", "s1", "post1", "tu-1", time.Date(2026, 7, 3, 10, 0, 3, 500_000_000, time.UTC), map[string]any{
+		"tool_name":  "Bash",
+		"tool_use_id": "tu-1",
+		"transcript_path": transcript,
+		"tool_response": map[string]any{"exitCode": 0},
+	})
+	summaries := buildSummaries([]*hookEvent{event, post})
+	if summaries[0].ContextTokens != 22 {
+		t.Errorf("ContextTokens = %d, want 22 (latest valid snapshot after malformed line)", summaries[0].ContextTokens)
+	}
+	if summaries[0].ContextWindow != 2000 {
+		t.Errorf("ContextWindow = %d, want 2000", summaries[0].ContextWindow)
+	}
+}
+
+func TestContextUsageCacheInvalidatesOnAppend(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("TRACEFRAME_TRANSCRIPT_ROOT", root)
+	transcript := filepath.Join(root, "rollout-append.jsonl")
+	first := `{"timestamp":"2026-07-03T10:00:02.100Z","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":10,"output_tokens":1,"total_tokens":11},"model_context_window":1000}}}`
+	if err := os.WriteFile(transcript, []byte(first+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	firstEvent := hookEventFromPayload(t, "PreToolUse", "s1", "pre1", "tu-1", time.Date(2026, 7, 3, 10, 0, 1, 0, time.UTC), map[string]any{
+		"tool_name":  "Bash",
+		"tool_use_id": "tu-1",
+		"transcript_path": transcript,
+	})
+	secondEvent := hookEventFromPayload(t, "PreToolUse", "s2", "pre2", "tu-2", time.Date(2026, 7, 3, 10, 0, 30, 0, time.UTC), map[string]any{
+		"tool_name":  "Bash",
+		"tool_use_id": "tu-2",
+		"transcript_path": transcript,
+	})
+	// Warm the cache.
+	if got := buildSummaries([]*hookEvent{firstEvent}); got[0].ContextTokens != 11 {
+		t.Fatalf("seed ContextTokens = %d, want 11", got[0].ContextTokens)
+	}
+	// Append a new snapshot; the cached entry must be invalidated.
+	f, err := os.OpenFile(transcript, os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.WriteString(`{"timestamp":"2026-07-03T10:00:32.100Z","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":20,"output_tokens":2,"total_tokens":99},"model_context_window":1500}}}` + "\n"); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if got := buildSummaries([]*hookEvent{secondEvent}); got[0].ContextTokens != 99 {
+		t.Errorf("post-append ContextTokens = %d, want 99 (stale cache?)", got[0].ContextTokens)
+	}
+}
+
+func TestIsClaudeOpus48Anchored(t *testing.T) {
+	cases := []struct {
+		model string
+		want  bool
+	}{
+		{"claude-opus-4-8", true},
+		{"claude-opus-4-8-20260101", true},
+		{"CLAUDE-OPUS-4-8", true},
+		{"claude-opus-4-80", false},
+		{"claude-opus-4-8-preview", false},
+		{"claude-opus-4-7", false},
+		{"claude-sonnet-4-8", false},
+		{"", false},
+	}
+	for _, c := range cases {
+		if got := isClaudeOpus48(strings.ToLower(c.model)); got != c.want {
+			t.Errorf("isClaudeOpus48(%q) = %v, want %v", c.model, got, c.want)
+		}
 	}
 }
 
@@ -75,8 +198,8 @@ func TestBuildSummariesAddsContextUsageFromClaudeTranscript(t *testing.T) {
 		"tool_name": "Read", "tool_use_id": "tu-1", "transcript_path": transcript,
 	})
 	summaries := buildSummaries([]*hookEvent{event})
-	if summaries[0].ContextTokens != 168314 {
-		t.Errorf("ContextTokens = %d, want 168314", summaries[0].ContextTokens)
+	if summaries[0].ContextTokens != 168169 {
+		t.Errorf("ContextTokens = %d, want 168169", summaries[0].ContextTokens)
 	}
 	if summaries[0].ContextWindow != 1000000 {
 		t.Errorf("ContextWindow = %d, want 1000000", summaries[0].ContextWindow)
@@ -95,9 +218,135 @@ func TestClaudeContextWindowUsesFallbackForOtherModels(t *testing.T) {
 
 func TestBrowserSelfTestsAreOptIn(t *testing.T) {
 	html := string(indexHTML)
-	if !strings.Contains(html, `url.searchParams.get("tests") !== "1"`) {
-		t.Fatal("browser self-tests must only run when ?tests=1 is present")
+	if strings.Contains(html, "notests=1") {
+		t.Fatal("legacy ?notests=1 opt-out must be gone")
 	}
+	body, ok := extractJSFunction(html, "runSelfTests")
+	if !ok {
+		t.Fatal("runSelfTests function not found in embedded HTML")
+	}
+	if !strings.Contains(body, `searchParams.get("tests")`) {
+		t.Errorf("runSelfTests must read the ?tests=1 query string; body:\n%s", body)
+	}
+	// The guard must appear among the first few statements (right after
+	// any local-variable bindings) so wrapping it in a never-invoked
+	// helper can't pass.
+	trimmed := strings.TrimLeft(body, "{ \t\r\n")
+	const guard = `if (url.searchParams.get("tests") !== "1") return;`
+	if !strings.HasPrefix(trimmed, guard) {
+		// Allow a `const url = new URL(window.location.href);` line first.
+		if i := strings.Index(trimmed, guard); i <= 0 || i > 120 {
+			t.Errorf("runSelfTests must return early on missing ?tests=1 within the first statements; first statements:\n%s", trimmed[:min(200, len(trimmed))])
+		}
+	}
+}
+
+// extractJSFunction returns the body (including braces) of the named
+// top-level `function NAME(` declaration. The scan is brace-aware so strings,
+// template literals, and comments are skipped. It returns ok=false when the
+// function cannot be located.
+func extractJSFunction(html, name string) (string, bool) {
+	header := "function " + name + "("
+	start := strings.Index(html, header)
+	if start < 0 {
+		return "", false
+	}
+	open := strings.Index(html[start:], "{")
+	if open < 0 {
+		return "", false
+	}
+	open += start
+	depth := 0
+	for i := open; i < len(html); i++ {
+		switch c := html[i]; c {
+		case '{':
+			depth++
+		case '}':
+			depth--
+			if depth == 0 {
+				return html[open : i+1], true
+			}
+		case '"', '\'', '`':
+			i = skipJSString(html, i)
+		case '/':
+			i = skipJSComment(html, i)
+		}
+	}
+	return "", false
+}
+
+func skipJSString(s string, i int) int {
+	quote := s[i]
+	for j := i + 1; j < len(s); j++ {
+		switch s[j] {
+		case '\\':
+			j++
+		case quote:
+			return j
+		}
+	}
+	return len(s) - 1
+}
+
+func skipJSComment(s string, i int) int {
+	if i+1 >= len(s) {
+		return i
+	}
+	switch s[i+1] {
+	case '/':
+		if j := strings.Index(s[i:], "\n"); j >= 0 {
+			return i + j
+		}
+		return len(s) - 1
+	case '*':
+		for j := i + 2; j+1 < len(s); j++ {
+			if s[j] == '*' && s[j+1] == '/' {
+				return j + 1
+			}
+		}
+		return len(s) - 1
+	}
+	return i
+}
+
+// countCallSites counts non-definition occurrences of `name` (followed by
+// `,`, `)`, whitespace, or end-of-input) while skipping strings, template
+// literals, and comments. The function declaration `function name(` is
+// excluded so the count is the number of reference call sites only.
+func countCallSites(html, name string) int {
+	count := 0
+	i := 0
+	for i < len(html) {
+		switch html[i] {
+		case '"', '\'', '`':
+			i = skipJSString(html, i) + 1
+			continue
+		case '/':
+			i = skipJSComment(html, i) + 1
+			continue
+		}
+		if strings.HasPrefix(html[i:], name) {
+			prev := byte(' ')
+			if i > 0 {
+				prev = html[i-1]
+			}
+			next := byte(' ')
+			if i+len(name) < len(html) {
+				next = html[i+len(name)]
+			}
+			isWord := (prev < 'a' || prev > 'z') && (prev < 'A' || prev > 'Z') && (prev < '0' || prev > '9') && prev != '_'
+			if isWord && (next == ',' || next == ')' || next == ' ' || next == '\t' || next == '\n' || next == '\r' || next == ';') {
+				prefix := strings.TrimSpace(html[:i])
+				if !strings.HasSuffix(prefix, "function") {
+					count++
+				}
+			}
+			i += len(name)
+			continue
+		}
+		i++
+	}
+	return count
 }
 
 // hookEventFromPayload builds a hookEvent from a JSON-encoded payload.
@@ -126,11 +375,11 @@ func TestMergePrePost(t *testing.T) {
 	pre := hookEventFromPayload(t, "PreToolUse", "s1", "e1", "tu-1",
 		time.Date(2026, 6, 30, 12, 0, 0, 0, time.UTC),
 		map[string]any{
-			"tool_name":   "Edit",
+			"tool_name":  "Edit",
 			"tool_use_id": "tu-1",
-			"cwd":         "/home/user/proj",
+			"cwd":        "/home/user/proj",
 			"tool_input": map[string]any{
-				"file_path":   "/home/user/proj/static/index.html",
+				"file_path":  "/home/user/proj/static/index.html",
 				"old_string":  "old",
 				"new_string":  "new\nnew",
 				"replace_all": false,
@@ -141,17 +390,17 @@ func TestMergePrePost(t *testing.T) {
 	post := hookEventFromPayload(t, "PostToolUse", "s1", "e2", "tu-1",
 		time.Date(2026, 6, 30, 12, 0, 0, 21_000_000, time.UTC),
 		map[string]any{
-			"tool_name":   "Edit",
+			"tool_name":  "Edit",
 			"tool_use_id": "tu-1",
 			"tool_response": map[string]any{
 				"filePath": "/home/user/proj/static/index.html",
 				"structuredPatch": []any{
 					map[string]any{
-						"oldStart": 1,
-						"oldLines": 1,
-						"newStart": 1,
-						"newLines": 2,
-						"lines":    []any{"-old", "+new", "+new"},
+						"oldStart":  1,
+						"oldLines":  1,
+						"newStart":  1,
+						"newLines":  2,
+						"lines":     []any{"-old", "+new", "+new"},
 					},
 				},
 				"originalFile": "huge content we want to drop",
@@ -198,10 +447,10 @@ func TestBashErrorStatus(t *testing.T) {
 	pre := hookEventFromPayload(t, "PreToolUse", "s1", "e1", "tu-2",
 		time.Date(2026, 6, 30, 12, 0, 0, 0, time.UTC),
 		map[string]any{
-			"tool_name":   "Bash",
+			"tool_name":  "Bash",
 			"tool_use_id": "tu-2",
 			"tool_input": map[string]any{
-				"command":     "false",
+				"command":    "false",
 				"description": "intentional failure",
 			},
 		},
@@ -209,13 +458,13 @@ func TestBashErrorStatus(t *testing.T) {
 	post := hookEventFromPayload(t, "PostToolUse", "s1", "e2", "tu-2",
 		time.Date(2026, 6, 30, 12, 0, 0, 5_000_000, time.UTC),
 		map[string]any{
-			"tool_name":   "Bash",
+			"tool_name":  "Bash",
 			"tool_use_id": "tu-2",
 			"tool_response": map[string]any{
-				"stdout":      "",
-				"stderr":      "boom",
+				"stdout":     "",
+				"stderr":     "boom",
 				"interrupted": false,
-				"exitCode":    1,
+				"exitCode":   1,
 			},
 		},
 	)
@@ -235,7 +484,7 @@ func TestPendingTool(t *testing.T) {
 	pre := hookEventFromPayload(t, "PreToolUse", "s1", "e1", "tu-3",
 		time.Date(2026, 6, 30, 12, 0, 0, 0, time.UTC),
 		map[string]any{
-			"tool_name":   "Read",
+			"tool_name":  "Read",
 			"tool_use_id": "tu-3",
 			"tool_input": map[string]any{
 				"file_path": "/home/user/proj/main.go",
@@ -257,7 +506,7 @@ func TestTurnGrouping(t *testing.T) {
 		return hookEventFromPayload(t, name, "s1", id, tuid, now.Add(offset), payload)
 	}
 
-	prompt1 := mk("UserPromptSubmit", "", "p1", 0, map[string]any{"prompt": "Analyze logs"})
+	prompt1 := mk("UserPromptSubmit", "", "p1", 0, map[string]any{"prompt":    "Analyze logs"})
 	pre1 := mk("PreToolUse", "tu-1", "pre1", time.Second, map[string]any{
 		"tool_name": "Bash", "tool_use_id": "tu-1",
 		"tool_input": map[string]any{"command": "ls", "description": "list files"},
@@ -266,10 +515,10 @@ func TestTurnGrouping(t *testing.T) {
 		"tool_name": "Bash", "tool_use_id": "tu-1",
 		"tool_response": map[string]any{"stdout": "a\nb", "exitCode": 0},
 	})
-	stop1 := mk("Stop", "", "stop1", 3*time.Second, map[string]any{"stop_hook_active": true})
+	stop1 := mk("Stop", "", "stop1", 3*time.Second, map[string]any{"stop_hook_active":  true})
 
-	prompt2 := mk("UserPromptSubmit", "", "p2", 10*time.Second, map[string]any{"prompt": "Now summarize"})
-	stop2 := mk("Stop", "", "stop2", 11*time.Second, map[string]any{"stop_hook_active": true})
+	prompt2 := mk("UserPromptSubmit", "", "p2", 10*time.Second, map[string]any{"prompt":    "Now summarize"})
+	stop2 := mk("Stop", "", "stop2", 11*time.Second, map[string]any{"stop_hook_active":  true})
 
 	tl := buildTimeline(buildSummaries([]*hookEvent{prompt1, pre1, post1, stop1, prompt2, stop2}))
 
@@ -303,23 +552,23 @@ func TestReadSummary(t *testing.T) {
 	pre := hookEventFromPayload(t, "PreToolUse", "s1", "e1", "tu-4",
 		time.Date(2026, 6, 30, 12, 0, 0, 0, time.UTC),
 		map[string]any{
-			"tool_name":   "Read",
+			"tool_name":  "Read",
 			"tool_use_id": "tu-4",
-			"cwd":         "/home/user/proj",
+			"cwd":        "/home/user/proj",
 			"tool_input": map[string]any{
 				"file_path": "/home/user/proj/README.md",
-				"offset":    0, // 0-based
-				"limit":     120,
+				"offset":   0, // 0-based
+				"limit":    120,
 			},
 		},
 	)
 	post := hookEventFromPayload(t, "PostToolUse", "s1", "e2", "tu-4",
 		time.Date(2026, 6, 30, 12, 0, 0, 13_000_000, time.UTC),
 		map[string]any{
-			"tool_name":   "Read",
+			"tool_name":  "Read",
 			"tool_use_id": "tu-4",
 			"tool_response": map[string]any{
-				"filePath":   "/home/user/proj/README.md",
+				"filePath":  "/home/user/proj/README.md",
 				"numLines":   120,
 				"startLine":  0,
 				"totalLines": 320,
@@ -340,24 +589,24 @@ func TestReadSummaryNestedFile(t *testing.T) {
 	pre := hookEventFromPayload(t, "PreToolUse", "s1", "e1", "tu-9",
 		time.Date(2026, 6, 30, 12, 0, 0, 0, time.UTC),
 		map[string]any{
-			"tool_name":   "Read",
+			"tool_name":  "Read",
 			"tool_use_id": "tu-9",
-			"cwd":         "/home/user/proj",
+			"cwd":        "/home/user/proj",
 			"tool_input": map[string]any{
 				"file_path": "/home/user/proj/README.md",
-				"offset":    0, // 0-based
-				"limit":     120,
+				"offset":   0, // 0-based
+				"limit":    120,
 			},
 		},
 	)
 	post := hookEventFromPayload(t, "PostToolUse", "s1", "e2", "tu-9",
 		time.Date(2026, 6, 30, 12, 0, 0, 13_000_000, time.UTC),
 		map[string]any{
-			"tool_name":   "Read",
+			"tool_name":  "Read",
 			"tool_use_id": "tu-9",
 			"tool_response": map[string]any{
-				"file": map[string]any{
-					"filePath":   "/home/user/proj/README.md",
+				"file":      map[string]any{
+					"filePath":  "/home/user/proj/README.md",
 					"numLines":   120,
 					"startLine":  0,
 					"totalLines": 320,
@@ -452,7 +701,7 @@ func TestTimelineIncludesNonToolEvents(t *testing.T) {
 		}),
 		hookEventFromPayload(t, "PermissionRequest", "s1", "pr1", "", base.Add(5*time.Second), map[string]any{"tool_name": "Bash"}),
 		hookEventFromPayload(t, "PreCompact", "s1", "pc1", "", base.Add(6*time.Second), map[string]any{"trigger": "auto"}),
-		hookEventFromPayload(t, "Stop", "s1", "stop1", "", base.Add(7*time.Second), map[string]any{"stop_hook_active": true}),
+		hookEventFromPayload(t, "Stop", "s1", "stop1", "", base.Add(7*time.Second), map[string]any{"stop_hook_active":  true}),
 		hookEventFromPayload(t, "SessionEnd", "s1", "se1", "", base.Add(8*time.Second), map[string]any{"reason": "logout"}),
 	}
 	summaries := buildSummaries(events)
@@ -500,7 +749,7 @@ func TestSessionEndTimeUsesMaxEnd(t *testing.T) {
 		// prompt at 10:02
 		hookEventFromPayload(t, "UserPromptSubmit", "s1", "p1", "", base.Add(2*time.Minute), map[string]any{"prompt": "go"}),
 		// stop at 10:03 (lands before the tool's Post at 10:10)
-		hookEventFromPayload(t, "Stop", "s1", "stop1", "", base.Add(3*time.Minute), map[string]any{"stop_hook_active": true}),
+		hookEventFromPayload(t, "Stop", "s1", "stop1", "", base.Add(3*time.Minute), map[string]any{"stop_hook_active":  true}),
 	}
 	summaries := buildSummaries(events)
 	tl := buildTimeline(summaries)
@@ -536,7 +785,7 @@ func TestSessionEndTimeLexicographicCompare(t *testing.T) {
 		// second event ends at 10:00:01 → "...01Z" (lexicographically smaller than "...00.5Z"? No,
 		// but the bug is that "10:00:00.5Z" < "10:00:00.500Z" when comparing strings, so
 		// the timestamp width matters).
-		hookEventFromPayload(t, "Stop", "s1", "stop1", "", base.Add(500*time.Millisecond), map[string]any{"stop_hook_active": true}),
+		hookEventFromPayload(t, "Stop", "s1", "stop1", "", base.Add(500*time.Millisecond), map[string]any{"stop_hook_active":  true}),
 	}
 	summaries := buildSummaries(events)
 	tl := buildTimeline(summaries)
@@ -563,7 +812,7 @@ func TestTurnCountIncludesToolOnlyTurn(t *testing.T) {
 		}),
 		hookEventFromPayload(t, "PostToolUse", "s1", "post1", "tu-1", base.Add(time.Second), map[string]any{
 			"tool_name": "Read", "tool_use_id": "tu-1",
-			"tool_response": map[string]any{"file": map[string]any{"filePath": "/x", "numLines": 10}},
+			"tool_response": map[string]any{"file":      map[string]any{"filePath": "/x", "numLines": 10}},
 		}),
 	}
 	summaries := buildSummaries(events)
@@ -583,9 +832,9 @@ func TestReadOneLinerLineRangeOffsetZero(t *testing.T) {
 	pre := hookEventFromPayload(t, "PreToolUse", "s1", "pre1", "tu-1",
 		time.Date(2026, 6, 30, 10, 0, 0, 0, time.UTC),
 		map[string]any{
-			"tool_name":   "Read",
+			"tool_name":  "Read",
 			"tool_use_id": "tu-1",
-			"cwd":         "/proj",
+			"cwd":        "/proj",
 			"tool_input": map[string]any{
 				"file_path": "/proj/main.go",
 				"limit":     100,
@@ -595,11 +844,11 @@ func TestReadOneLinerLineRangeOffsetZero(t *testing.T) {
 	post := hookEventFromPayload(t, "PostToolUse", "s1", "post1", "tu-1",
 		time.Date(2026, 6, 30, 10, 0, 0, 50_000_000, time.UTC),
 		map[string]any{
-			"tool_name":   "Read",
+			"tool_name":  "Read",
 			"tool_use_id": "tu-1",
 			"tool_response": map[string]any{
-				"file": map[string]any{
-					"filePath":   "/proj/main.go",
+				"file":      map[string]any{
+					"filePath":  "/proj/main.go",
 					"numLines":   100,
 					"startLine":  0,
 					"totalLines": 500,
@@ -618,9 +867,9 @@ func TestReadOneLinerLineRangeOffset(t *testing.T) {
 	pre := hookEventFromPayload(t, "PreToolUse", "s1", "pre1", "tu-1",
 		time.Date(2026, 6, 30, 10, 0, 0, 0, time.UTC),
 		map[string]any{
-			"tool_name":   "Read",
+			"tool_name":  "Read",
 			"tool_use_id": "tu-1",
-			"cwd":         "/proj",
+			"cwd":        "/proj",
 			"tool_input": map[string]any{
 				"file_path": "/proj/main.go",
 				"offset":    10,
@@ -631,11 +880,11 @@ func TestReadOneLinerLineRangeOffset(t *testing.T) {
 	post := hookEventFromPayload(t, "PostToolUse", "s1", "post1", "tu-1",
 		time.Date(2026, 6, 30, 10, 0, 0, 50_000_000, time.UTC),
 		map[string]any{
-			"tool_name":   "Read",
+			"tool_name":  "Read",
 			"tool_use_id": "tu-1",
 			"tool_response": map[string]any{
-				"file": map[string]any{
-					"filePath":   "/proj/main.go",
+				"file":      map[string]any{
+					"filePath":  "/proj/main.go",
 					"numLines":   20,
 					"startLine":  10,
 					"totalLines": 500,
