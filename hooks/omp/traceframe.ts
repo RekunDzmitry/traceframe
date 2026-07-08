@@ -24,10 +24,14 @@
  *
  * The extension never blocks Omp. Every POST is fire-and-forget; a missing
  * or slow Traceframe server cannot stall or crash the agent.
+ *
+ * The file is intentionally dependency-free — no third-party imports —
+ * so the documented `cp`-based install works without a sibling
+ * package.json or extra install step. Event payloads are read with
+ * runtime type guards at the handler boundary.
  */
 
 import type { ExtensionAPI, ExtensionContext } from "@oh-my-pi/pi-coding-agent";
-import { z } from "zod/v4";
 
 // --- Config ----------------------------------------------------------------
 
@@ -36,70 +40,46 @@ const HOOK_URL = `${ENDPOINT}/api/hooks`;
 const DISABLED = process.env.TRACEFRAME_DISABLED === "1";
 const DEBUG = process.env.TRACEFRAME_DEBUG === "1";
 
-// --- Schemas ---------------------------------------------------------------
+// --- Event narrowers -------------------------------------------------------
 //
-// Events come from the Omp runtime (out-of-process boundary), so parse them
-// with zod before reading any field. The schemas are intentionally
-// permissive (.passthrough() + optional fields) — Omp's event shape can
-// grow new fields without breaking us, and we only need a handful of
-// fields per event.
+// Omp events are `unknown` at the API boundary; we only read a handful of
+// fields from each. The guards below narrow each handler's `event` to just
+// the fields that handler reads, keeping the read surface small and the
+// behavior identical to a typed schema. Every guard accepts `undefined`
+// gracefully — Omp can grow new optional fields without breaking us.
 
-const SessionStartEvent = z
-	.object({
-		reason: z.string().optional(),
-	})
-	.passthrough();
+function asObject(v: unknown): Record<string, unknown> | undefined {
+	return v !== null && typeof v === "object" ? (v as Record<string, unknown>) : undefined;
+}
 
-const InputEvent = z
-	.object({
-		text: z.string().optional(),
-		source: z.string().optional(),
-	})
-	.passthrough();
+function readString(obj: Record<string, unknown> | undefined, key: string): string | undefined {
+	if (!obj) return undefined;
+	const value = obj[key];
+	return typeof value === "string" ? value : undefined;
+}
 
-const ToolExecutionStartEvent = z
-	.object({
-		toolCallId: z.string().optional(),
-		toolName: z.string().optional(),
-		args: z.unknown().optional(),
-	})
-	.passthrough();
+function readBoolean(obj: Record<string, unknown> | undefined, key: string): boolean | undefined {
+	if (!obj) return undefined;
+	const value = obj[key];
+	return typeof value === "boolean" ? value : undefined;
+}
 
-const ToolExecutionEndEvent = z
-	.object({
-		toolCallId: z.string().optional(),
-		toolName: z.string().optional(),
-		args: z.unknown().optional(),
-		result: z.unknown().optional(),
-		isError: z.boolean().optional(),
-	})
-	.passthrough();
 
-const ContentBlock = z
-	.object({
-		type: z.string().optional(),
-		text: z.string().optional(),
-	})
-	.passthrough();
-
-const Message = z
-	.object({
-		role: z.string(),
-		content: z.unknown(),
-	})
-	.passthrough();
-
-const AgentEndEvent = z
-	.object({
-		messages: z.array(Message).optional(),
-	})
-	.passthrough();
-
-const SessionShutdownEvent = z
-	.object({
-		reason: z.string().optional(),
-	})
-	.passthrough();
+function readMessages(obj: Record<string, unknown> | undefined) {
+	if (!obj) return undefined;
+	const value = obj["messages"];
+	if (!Array.isArray(value)) return undefined;
+	const out: Array<{ role: string; content: unknown }> = [];
+	for (const item of value) {
+		const o = asObject(item);
+		if (!o) continue;
+		const role = readString(o, "role");
+		const content = o["content"];
+		if (role === undefined || content === undefined) continue;
+		out.push({ role, content });
+	}
+	return out;
+}
 
 // --- Session state ---------------------------------------------------------
 
@@ -196,11 +176,19 @@ function fire(
 	void postHook(payload);
 }
 
+/** Strip an unknown value's surface so it can be used as a top-level event
+ *  property without leaking non-serializable junk to Traceframe. */
+function asRecord(value: unknown): Record<string, unknown> {
+	return value !== null && typeof value === "object" ? (value as Record<string, unknown>) : {};
+}
+
 // --- Event-specific shaping ------------------------------------------------
 
 /** Flatten the content blocks of the last assistant message into a single
  *  string Traceframe can render as the assistant reply in Stop events. */
-function lastAssistantText(messages: z.infer<typeof Message>[] | undefined): string {
+function lastAssistantText(
+	messages: Array<{ role: string; content: unknown }> | undefined,
+): string {
 	if (!messages || messages.length === 0) return "";
 	for (let i = messages.length - 1; i >= 0; i--) {
 		const msg = messages[i];
@@ -210,10 +198,11 @@ function lastAssistantText(messages: z.infer<typeof Message>[] | undefined): str
 		if (Array.isArray(content)) {
 			const parts: string[] = [];
 			for (const raw of content) {
-				const block = ContentBlock.safeParse(raw);
-				if (!block.success) continue;
-				if (block.data.type === "text" && typeof block.data.text === "string") {
-					parts.push(block.data.text);
+				const block = asObject(raw);
+				if (!block) continue;
+				if (block["type"] === "text") {
+					const text = block["text"];
+					if (typeof text === "string") parts.push(text);
 				}
 			}
 			return parts.join("\n");
@@ -230,9 +219,9 @@ export default function (pi: ExtensionAPI) {
 	// /fork, /clone). The session_id is re-resolved per-event so /fork and
 	// /clone get their own bucket automatically.
 	pi.on("session_start", async (event, ctx) => {
-		const parsed = SessionStartEvent.safeParse(event);
-		if (!parsed.success) return;
-		fire(ctx, "SessionStart", { ...parsed.data }, { reason: parsed.data.reason });
+		const obj = asObject(event);
+		const reason = readString(obj, "reason");
+		fire(ctx, "SessionStart", asRecord(event), { reason });
 	});
 
 	// UserPromptSubmit: capture raw user input that flows through to the
@@ -240,44 +229,46 @@ export default function (pi: ExtensionAPI) {
 	// "continue" behavior). Skip messages injected by other extensions to
 	// avoid logging automated sub-agent prompts as if the user typed them.
 	pi.on("input", async (event, ctx) => {
-		const parsed = InputEvent.safeParse(event);
-		if (!parsed.success) return;
-		if (parsed.data.source === "extension") return; // sent by another extension
-		if (typeof parsed.data.text !== "string" || parsed.data.text.trim() === "") return;
-		fire(ctx, "UserPromptSubmit", { text: parsed.data.text, source: parsed.data.source });
+		const obj = asObject(event);
+		const source = readString(obj, "source");
+		if (source === "extension") return; // sent by another extension
+		const text = readString(obj, "text");
+		if (text === undefined || text.trim() === "") return;
+		fire(ctx, "UserPromptSubmit", { text, source });
 	});
 
 	// PreToolUse / PostToolUse: tool_execution_start runs before the tool,
 	// tool_execution_end runs after. We forward both with the same
 	// tool_use_id so Traceframe can pair them into a single timeline row.
 	pi.on("tool_execution_start", async (event, ctx) => {
-		const parsed = ToolExecutionStartEvent.safeParse(event);
-		if (!parsed.success) return;
+		const obj = asObject(event);
+		const toolCallId = readString(obj, "toolCallId");
+		const toolName = readString(obj, "toolName");
+		const args = obj ? obj["args"] : undefined;
 		fire(
 			ctx,
 			"PreToolUse",
-			{ toolName: parsed.data.toolName, args: parsed.data.args },
-			{ tool_use_id: parsed.data.toolCallId, tool_name: parsed.data.toolName, tool_input: parsed.data.args },
+			{ toolName, args },
+			{ tool_use_id: toolCallId, tool_name: toolName, tool_input: args },
 		);
 	});
 
 	pi.on("tool_execution_end", async (event, ctx) => {
-		const parsed = ToolExecutionEndEvent.safeParse(event);
-		if (!parsed.success) return;
+		const obj = asObject(event);
+		const toolCallId = readString(obj, "toolCallId");
+		const toolName = readString(obj, "toolName");
+		const args = obj ? obj["args"] : undefined;
+		const result = obj ? obj["result"] : undefined;
+		const isError = readBoolean(obj, "isError");
 		fire(
 			ctx,
 			"PostToolUse",
+			{ toolName, args, result, isError },
 			{
-				toolName: parsed.data.toolName,
-				args: parsed.data.args,
-				result: parsed.data.result,
-				isError: parsed.data.isError,
-			},
-			{
-				tool_use_id: parsed.data.toolCallId,
-				tool_name: parsed.data.toolName,
-				tool_input: parsed.data.args,
-				tool_response: parsed.data.result,
+				tool_use_id: toolCallId,
+				tool_name: toolName,
+				tool_input: args,
+				tool_response: result,
 			},
 		);
 	});
@@ -286,19 +277,19 @@ export default function (pi: ExtensionAPI) {
 	// text so the UI can show it the same way it shows Claude's
 	// last_assistant_message on Stop events.
 	pi.on("agent_end", async (event, ctx) => {
-		const parsed = AgentEndEvent.safeParse(event);
-		if (!parsed.success) return;
-		fire(ctx, "Stop", { messageCount: parsed.data.messages?.length ?? 0 }, {
-			last_assistant_message: lastAssistantText(parsed.data.messages),
+		const obj = asObject(event);
+		const messages = readMessages(obj);
+		fire(ctx, "Stop", { messageCount: messages?.length ?? 0 }, {
+			last_assistant_message: lastAssistantText(messages),
 		});
 	});
 
 	// SessionEnd: when the session runtime is torn down (exit, /new,
 	// /resume to a different session).
 	pi.on("session_shutdown", async (event, ctx) => {
-		const parsed = SessionShutdownEvent.safeParse(event);
-		if (!parsed.success) return;
-		fire(ctx, "SessionEnd", { ...parsed.data });
+		const obj = asObject(event);
+		const reason = readString(obj, "reason");
+		fire(ctx, "SessionEnd", asRecord(event), { reason });
 	});
 
 	// Surface the resolved endpoint once on startup so the user can see
