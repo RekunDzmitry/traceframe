@@ -1,32 +1,51 @@
 /*
- * context.js — context-focused view for a single session.
+ * context.js — Context Usage Map for a single session.
  *
- * Aggregates the per-session timeline + the flat hook list into a stack of
- * logical blocks: session metadata, instructions, tools available, files
- * (cache), commands, searches, skills, turns, compacts, notes. Each block
- * and each item has a "last touched" timestamp; the age is colored by
- * staleness, and a hover tooltip shows the full timestamp + age + the
- * provider-specific note about what the staleness actually means.
+ * Aggregates the per-session timeline + the flat hook list + the last
+ * assistant message's `usage` block into a token grid + per-category
+ * breakdown + per-message block list. Modeled on Claude Code's
+ * `/context` command (leaked source: toby-bridges/claude-code-leaked
+ * src/utils/analyzeContext.ts) but adapted to:
  *
- * Provider inference: the hook payloads carry the same shape for Claude,
- * Codex, and Pi, but `transcript_path` and a few hints let us label the
- * session for the badge. The block contents are provider-agnostic.
+ *   - run in the browser, not in the agent runtime
+ *   - take hook events (no full message array)
+ *   - use a CDN-loaded tokenizer for token counts (Claude via
+ *     @anthropic-ai/tokenizer, OpenAI/Codex via gpt-tokenizer's
+ *     cl100k_base, heuristic fallback when the CDN is unreachable)
+ *   - derive cache stats from `usage.cache_read_input_tokens` /
+ *     `usage.cache_creation.ephemeral_5m_input_tokens` /
+ *     `usage.cache_creation.ephemeral_1h_input_tokens` when present,
+ *     and fall back to a "re-read == cache hit" proxy when not
  *
- * No server roundtrips. Pure functions, no DOM access in the aggregator.
+ * The shape returned to the renderer:
  *
- * Loaded as a classic <script> by static/index.html; attaches to
- * window.Traceframe.context and exposes runTests() for the in-page smoke
- * runner.
+ *   {
+ *     model: string,             // claude-opus-4-7, gpt-4, codex, ...
+ *     provider: string,          // claude | codex | pi | unknown
+ *     totalTokens: number,       // sum across all categories
+ *     maxTokens: number,         // context window for the model
+ *     percentage: number,        // totalTokens / maxTokens, [0..1+]
+ *     categories: Category[],    // System prompt, Tools, Skills, Messages, ...
+ *     gridRows: Square[][],      // 10x10 = 100 squares, 1% each
+ *     apiUsage: { input_tokens, output_tokens,
+ *                 cache_creation_input_tokens,
+ *                 cache_read_input_tokens } | null,
+ *     messages: MessageBlock[],  // one per message, with cache stats + size hint
+ *   }
+ *
+ * `messages` is the click target: clicking a block in the UI looks up
+ * its `id` here and opens a dialog with the full content. The block id
+ * is `m:<event_id>` for messages and `b:<kind>:<slug>` for system blocks.
+ *
+ * Loaded as a classic <script> by static/index.html and exposes
+ * `window.Traceframe.context` for the rest of the page.
  */
 (function () {
   "use strict";
 
-  // ---------- Provider inference -----------------------------------------
+  // ---------- Provider / model inference -----------------------------------
 
-  // Best-effort. Looks at transcript_path, a couple of payload fields, and
-  // session_name. Returns one of: "claude" | "codex" | "pi" | "unknown".
-  // Falls back to "unknown" gracefully — the rest of the view is
-  // provider-agnostic and renders fine without a label.
+  /** Best-effort. Returns one of: "claude" | "codex" | "pi" | "unknown". */
   function inferProvider(payload) {
     if (!payload || typeof payload !== "object") return "unknown";
     const tp = stringField(payload, "transcript_path", "transcriptPath");
@@ -47,94 +66,130 @@
 
   function stringField(obj, ...keys) {
     for (const k of keys) {
+      if (!obj || typeof obj !== "object") continue;
       const v = obj[k];
       if (typeof v === "string" && v.trim() !== "") return v;
     }
     return "";
   }
-  function numberField(obj, ...keys) {
-    for (const k of keys) {
-      const v = obj ? obj[k] : undefined;
-      if (typeof v === "number" && !isNaN(v)) return v;
+
+  /** Pull the model id out of any hook event. Assistant events carry it
+   *  directly; others may carry it in the payload. Returns "" if missing. */
+  function inferModel(allHooks) {
+    for (const h of allHooks || []) {
+      if (!h || typeof h !== "object") continue;
+      if (typeof h.model === "string" && h.model.length > 0) return h.model;
+      if (h.payload && typeof h.payload === "object") {
+        const m = h.payload.model;
+        if (typeof m === "string" && m.length > 0) return m;
+      }
     }
-    return 0;
+    return "";
   }
 
+  // ---------- Context window by model --------------------------------------
 
-  // ---------- Staleness color buckets ------------------------------------
-  //
-  // These are *our* freshness signal, not a provider cache TTL. The values
-  // are tuned for "agent-in-a-loop" pacing: <5m feels live, 5–30m is the
-  // agent's "I should look at this again" zone, >30m is probably stale.
-  // The tooltip text says so explicitly so the meaning isn't lost.
-  //
-  // Buckets are kind-aware because the meaning of "stale" differs. A
-  // tool used 90 minutes ago is normal; a file read 90 minutes ago and
-  // not re-read since is genuinely out-of-date.
-  function stalenessTone(kind, ageMs) {
-    if (ageMs == null || ageMs < 0) return "fresh";
-    if (kind === "file") {
-      if (ageMs < 5 * 60_000) return "fresh";
-      if (ageMs < 30 * 60_000) return "warm";
-      return "cold";
+  /** Conservative defaults. Expand as we get accurate numbers from the
+   *  agent hooks. The UI's percentage bar uses this as the denominator
+   *  even when the actual API limit differs — close enough for a glance. */
+  const MODEL_CONTEXT_WINDOWS = {
+    "claude-opus-4-7": 1_000_000,
+    "claude-opus-4":   1_000_000,
+    "claude-sonnet-4": 1_000_000,
+    "claude-3-7-sonnet": 200_000,
+    "claude-3-5-sonnet": 200_000,
+    "claude-3-5-haiku": 200_000,
+    "claude-3-opus":   200_000,
+    "gpt-4":           128_000,
+    "gpt-4-turbo":     128_000,
+    "gpt-4o":          128_000,
+    "gpt-4o-mini":     128_000,
+    "o1":              200_000,
+    "o1-mini":         128_000,
+    "o3-mini":         200_000,
+    "codex":           200_000,
+  };
+
+  function getContextWindowForModel(model) {
+    if (typeof model === "string" && MODEL_CONTEXT_WINDOWS[model]) {
+      return MODEL_CONTEXT_WINDOWS[model];
     }
-    if (kind === "tool") {
-      if (ageMs < 15 * 60_000) return "fresh";
-      if (ageMs < 60 * 60_000) return "warm";
-      return "cold";
+    // Default to 200k — matches the Claude 3.x / 4.x Sonnet default and
+    // the Codex default. OpenAI gpt-4 is the only one we'd miss here.
+    return 200_000;
+  }
+
+  // ---------- Tokenizer (lazy) ----------------------------------------------
+
+  /** Token-counting facade that wraps the CDN-loaded tokenizer module. */
+  async function countTokens(text, model) {
+    const t = (typeof window !== "undefined" && window.Traceframe && window.Traceframe.tokenizer) || null;
+    if (t && typeof t.countTokens === "function") {
+      try { return await t.countTokens(text, model); } catch (_) {}
     }
-    if (ageMs < 10 * 60_000) return "fresh";
-    if (ageMs < 60 * 60_000) return "warm";
-    return "cold";
+    return t && typeof t.estimate === "function"
+      ? t.estimate(text)
+      : Math.max(1, Math.ceil((text || "").length / 4));
   }
 
-  function formatAge(ageMs) {
-    if (ageMs == null || ageMs < 0) return "—";
-    if (ageMs < 1000) return "<1s";
-    const s = Math.floor(ageMs / 1000);
-    if (s < 60) return s + "s";
-    const m = Math.floor(s / 60);
-    if (m < 60) return m + "m " + (s % 60) + "s";
-    const h = Math.floor(m / 60);
-    if (h < 24) return h + "h " + (m % 60) + "m";
-    const d = Math.floor(h / 24);
-    return d + "d " + (h % 24) + "h";
-  }
+  // ---------- Filter hooks to one session -----------------------------------
 
-  function formatFullTimestamp(iso) {
-    if (!iso) return "—";
-    const d = new Date(iso);
-    if (isNaN(d.getTime())) return iso;
-    return d.toISOString().replace("T", " ").replace(/\.\d+Z$/, "Z");
-  }
-
-  // ---------- Hook extraction --------------------------------------------
-
-  // The timeline groups events into turns, but we need every hook event
-  // for a session to compute some block contents (compacts, notifications,
-  // the file dedup). `hooks` is the flat list from /api/hooks filtered to
-  // the current session.
   function filterSessionHooks(allHooks, sessionID) {
+    if (!sessionID) return (allHooks || []).slice();
     return (allHooks || []).filter((h) => h && h.session_id === sessionID);
   }
 
-  // Tries to pull a path string out of an event's input/output, however
-  // the provider spelled it. Returns "" if not a file-bearing event.
+  // ---------- API usage extraction (cache stats) ---------------------------
+
+  /** Walk hooks for the most recent assistant record carrying `usage`.
+   *  The pi extension forwards `usage` on Stop events; claude/codex may
+   *  carry it on assistant events directly. */
+  function extractAPIUsage(hooks) {
+    const usage = {
+      input_tokens: 0,
+      output_tokens: 0,
+      cache_creation_input_tokens: 0,
+      cache_read_input_tokens: 0,
+      cache_creation: null,
+      present: false,
+    };
+    for (let i = (hooks || []).length - 1; i >= 0; i--) {
+      const h = hooks[i];
+      if (!h || typeof h !== "object") continue;
+      const u = h.usage || (h.payload && typeof h.payload === "object" && h.payload.usage);
+      if (u && typeof u === "object") {
+        if (typeof u.input_tokens === "number") usage.input_tokens = u.input_tokens;
+        if (typeof u.output_tokens === "number") usage.output_tokens = u.output_tokens;
+        if (typeof u.cache_creation_input_tokens === "number") usage.cache_creation_input_tokens = u.cache_creation_input_tokens;
+        if (typeof u.cache_read_input_tokens === "number") usage.cache_read_input_tokens = u.cache_read_input_tokens;
+        if (u.cache_creation && typeof u.cache_creation === "object") {
+          usage.cache_creation = {
+            ephemeral_5m_input_tokens: typeof u.cache_creation.ephemeral_5m_input_tokens === "number" ? u.cache_creation.ephemeral_5m_input_tokens : 0,
+            ephemeral_1h_input_tokens: typeof u.cache_creation.ephemeral_1h_input_tokens === "number" ? u.cache_creation.ephemeral_1h_input_tokens : 0,
+          };
+        }
+        usage.present = true;
+        return usage;
+      }
+    }
+    return usage;
+  }
+
+  // ---------- Category builders --------------------------------------------
+  //
+  // Each builder returns a Category { name, kind, tokens, items, ... }.
+  // Items are clickable units that show up in the per-category list and
+  // (for messages) in the message-block grid.
+
+  const FILE_TOOLS = new Set(["Read", "Edit", "Write", "MultiEdit", "NotebookEdit"]);
+
   function filePathOf(ev) {
     if (!ev) return "";
     const input = ev.input || {};
     if (typeof input.file_path === "string") return input.file_path;
     if (typeof input.notebook_path === "string") return input.notebook_path;
     if (typeof input.path === "string") return input.path;
-    if (typeof input.pattern === "string" && typeof input.path === "string") {
-      return input.path; // Glob/Grep with pattern + path
-    }
-    if (Array.isArray(input.path) && input.path.length) {
-      return String(input.path[0]);
-    }
-    const output = ev.output || {};
-    if (typeof output.filePath === "string") return output.filePath;
-    if (typeof output.path === "string") return output.path;
+    if (Array.isArray(input.path) && input.path.length) return String(input.path[0]);
     return "";
   }
 
@@ -145,730 +200,608 @@
     if (max && head.length > max) return head.slice(0, max) + "…";
     return head;
   }
-  function findFirst(arr, pred) {
-    if (!arr) return null;
-    for (let i = 0; i < arr.length; i++) {
-      if (pred(arr[i])) return arr[i];
-    }
-    return null;
-  }
 
-
-  // ---------- Block builders ---------------------------------------------
-
-  // Each builder returns either:
-  //   - a block object (added to the output)
-  //   - null (skipped — nothing meaningful for this session)
-  // Block shape:
-  //   { kind, title, icon, subtitle, count, last_touched, items, empty_text, raw_events }
-  // Item shape:
-  //   { id, title, subtitle, event_id, touched_at, kind, count, status, tooltip, raw_events }
-
-  function buildSessionBlock(timeline, hooks) {
-    const s = (timeline && timeline.session) || {};
-    const provider = inferProvider(extractFirstPayload(hooks));
-    const first = hooks && hooks.length ? hooks[hooks.length - 1] : null; // oldest
-    const last = hooks && hooks.length ? hooks[0] : null; // newest
-    const started = s.started_at || (first && first.event_time) || "";
-    const ended = s.ended_at || (last && last.event_time) || "";
-    const lines = [
-      provider !== "unknown" ? "Provider: " + provider : null,
-      "Started: " + formatFullTimestamp(started),
-      "Ended: " + formatFullTimestamp(ended),
-      "Duration: " + (s.duration_ms ? formatAge(s.duration_ms) : "—"),
-      "Turns: " + (s.turn_count || 0),
-      "Tools: " + (s.tool_count || 0),
-      "Events: " + (s.event_count || (hooks ? hooks.length : 0)),
-      s.failure_count ? "Failures: " + s.failure_count : null,
-    ].filter(Boolean);
-    return {
-      kind: "session",
-      title: "Session",
-      icon: "◉",
-      subtitle: provider !== "unknown" ? provider : "agent session",
-      count: 0,
-      last_touched: ended,
-      items: lines.map((line, i) => ({
-        id: "session-line-" + i,
-        title: line,
-        subtitle: "",
-        event_id: null,
-        touched_at: ended,
-        kind: "session",
-        tooltip: null,
-        raw_events: [],
-      })),
-      empty_text: "",
-      raw_events: [],
-    };
-  }
-
-  function extractFirstPayload(hooks) {
+  function findFirstPayload(hooks) {
     if (!hooks || !hooks.length) return null;
-    // The first event we can find with a real payload wins. SessionStart is
-    // a good candidate but might not be first in `hooks`; fall back to
-    // whatever the timeline carries.
     for (const h of hooks) {
-      if (h && (h.transcript_path || h.cwd || h.hook_event_name === "SessionStart")) {
-        return h;
-      }
+      if (h && (h.transcript_path || h.cwd || h.hook_event_name === "SessionStart")) return h;
     }
     return hooks[0];
   }
 
-  function buildInstructionsBlock(timeline, hooks) {
-    // We have no system prompt in the hook payload. Show what we *do* have:
-    // the first user prompt (as the task) and the first SessionStart's
-    // permission mode + effort + cwd. Honest about what's missing.
-    const firstPrompt = findFirst(hooks, (h) => h.kind === "user_prompt");
-    const firstStart = findFirst(hooks, (h) => h.event_name === "SessionStart");
-    const items = [];
-
-    if (firstStart) {
-      const perm = firstStart.permission_mode;
-      if (perm) {
-        items.push({
-          id: "perm-mode",
-          title: "Permission mode: " + perm,
-          subtitle: "set at session start",
-          event_id: firstStart.event_id,
-          touched_at: firstStart.event_time,
-          kind: "instructions",
-          tooltip: "Permission mode set at session start. " +
-            "It controls which tool actions the agent auto-approves.",
-        });
-      }
-      const effort = firstStart.effort;
-      if (effort) {
-        items.push({
-          id: "effort",
-          title: "Effort: " + effort,
-          subtitle: "set at session start",
-          event_id: firstStart.event_id,
-          touched_at: firstStart.event_time,
-          kind: "instructions",
-          tooltip: "Reasoning effort requested at session start. " +
-            "Doesn't change the hook stream.",
-        });
-      }
+  /** System prompt: from SessionStart payload.system_prompt. */
+  function buildSystemPromptCategory(hooks) {
+    let prompt = "";
+    for (const h of hooks || []) {
+      if (!h || h.kind !== "session_start") continue;
+      const p = h.system_prompt || (h.payload && h.payload.system_prompt);
+      if (typeof p === "string" && p.length > 0) { prompt = p; break; }
     }
-
-    if (firstPrompt) {
-      items.push({
-        id: "first-prompt",
-        title: "First prompt: " + firstLine(firstPrompt.content || firstPrompt.summary || "", 100),
-        subtitle: "stand-in for the task",
-        event_id: firstPrompt.event_id,
-        touched_at: firstPrompt.event_time,
-        kind: "instructions",
-        tooltip: "The first user prompt in this session, shown as a stand-in " +
-          "for the task. The system prompt itself is not in the hook payload.",
-      });
-    }
-
-    if (items.length === 0) {
-      return null;
+    if (!prompt) {
+      return { name: "System prompt", kind: "system_prompt", tokens: 0, items: [], note: "not captured by this provider's hook" };
     }
     return {
-      kind: "instructions",
-      title: "Instructions",
-      icon: "§",
-      subtitle: "what the agent was started with",
-      count: items.length,
-      last_touched: items[0].touched_at,
+      name: "System prompt",
+      kind: "system_prompt",
+      tokens: 0, // filled in by main aggregator (async)
+      items: [{ id: "sys-prompt", text: prompt, touched_at: null }],
+    };
+  }
+
+  /** System tools: from SessionStart payload.system_tools (pi) or derived
+   *  from observed tool calls (any provider). We use the observed list when
+   *  the declared list is missing — every tool that was called IS a tool
+   *  the model knows about. */
+  function buildSystemToolsCategory(hooks) {
+    const declared = [];
+    for (const h of hooks || []) {
+      if (!h || h.kind !== "session_start") continue;
+      const arr = h.system_tools || (h.payload && h.payload.system_tools);
+      if (Array.isArray(arr)) {
+        for (const t of arr) {
+          if (t && typeof t === "object" && typeof t.name === "string") {
+            declared.push({ name: t.name, description: typeof t.description === "string" ? t.description : "" });
+          }
+        }
+      }
+    }
+    const used = new Set();
+    const usedNames = new Map();
+    for (const h of hooks || []) {
+      if (!h || h.kind !== "tool") continue;
+      if (typeof h.tool_name === "string" && h.tool_name) {
+        used.add(h.tool_name);
+        usedNames.set(h.tool_name, (usedNames.get(h.tool_name) || 0) + 1);
+      }
+    }
+    const items = [];
+    const seen = new Set();
+    for (const d of declared) {
+      if (!seen.has(d.name)) {
+        seen.add(d.name);
+        items.push({ id: "tool:" + d.name, text: d.name, subtitle: d.description ? firstLine(d.description, 80) : "", count: usedNames.get(d.name) || 0 });
+      }
+    }
+    for (const name of used) {
+      if (!seen.has(name)) {
+        seen.add(name);
+        items.push({ id: "tool:" + name, text: name, subtitle: "", count: usedNames.get(name) || 0 });
+      }
+    }
+    return {
+      name: "System tools",
+      kind: "system_tools",
+      tokens: 0,
       items,
-      empty_text: "No instructions captured for this session.",
-      raw_events: items.filter((i) => i.event_id).map((i) => i.event_id),
+      note: declared.length === 0 ? "inferred from observed tool calls" : null,
     };
   }
 
-  function buildToolsBlock(timeline, hooks) {
-    // All unique tool_name values, with the call count and last invocation
-    // time. Order by count desc; ties broken by last invocation desc.
-    const map = new Map();
-    for (const h of hooks || []) {
-      if (h.kind !== "tool" || !h.tool_name) continue;
-      const cur = map.get(h.tool_name) || {
-        name: h.tool_name,
-        count: 0,
-        errors: 0,
-        first_at: h.event_time,
-        last_at: h.event_time,
-        event_id: h.event_id,
-        status: h.status,
-      };
-      cur.count += 1;
-      if (h.status === "error") cur.errors += 1;
-      if (h.event_time && (!cur.last_at || h.event_time > cur.last_at)) {
-        cur.last_at = h.event_time;
-        cur.event_id = h.event_id;
-      }
-      if (h.event_time && h.event_time < cur.first_at) {
-        cur.first_at = h.event_time;
-      }
-      map.set(h.tool_name, cur);
-    }
-    const items = [...map.values()].sort((a, b) => {
-      if (b.count !== a.count) return b.count - a.count;
-      return String(b.last_at).localeCompare(String(a.last_at));
-    });
-    if (items.length === 0) return null;
-    return {
-      kind: "tools",
-      title: "Tools available",
-      icon: "⚙",
-      subtitle: "every tool the agent called in this session",
-      count: items.length,
-      last_touched: items[0].last_at,
-      items: items.map((t) => ({
-        id: "tool-" + t.name,
-        title: t.name,
-        subtitle: t.count + " call" + (t.count === 1 ? "" : "s") +
-          (t.errors ? " · " + t.errors + " failed" : ""),
-        event_id: t.event_id,
-        touched_at: t.last_at,
-        kind: "tool",
-        tooltip:
-          "First invoked: " + formatFullTimestamp(t.first_at) + "\n" +
-          "Last invoked: " + formatFullTimestamp(t.last_at) + "\n" +
-          "Total calls: " + t.count +
-          (t.errors ? "\nFailures: " + t.errors : ""),
-      })),
-      empty_text: "No tool calls captured.",
-      raw_events: items.map((t) => t.event_id).filter(Boolean),
-    };
-  }
-
-  function buildFilesBlock(timeline, hooks) {
-    // One item per unique file_path, with the latest touch and a "kinds"
-    // summary (read/edited/etc). Read and Edit on the same file collapse
-    // into one block item but keep both events in raw_events.
-    const fileTools = new Set(["Read", "Edit", "Write", "MultiEdit", "NotebookEdit"]);
-    const map = new Map();
-    for (const h of hooks || []) {
-      if (h.kind !== "tool" || !fileTools.has(h.tool_name)) continue;
-      const path = filePathOf(h);
-      if (!path) continue;
-      const cur = map.get(path) || {
-        path,
-        kinds: new Set(),
-        lines: 0,
-        first_at: h.event_time,
-        last_at: h.event_time,
-        last_event_id: h.event_id,
-        last_tool: h.tool_name,
-        events: [],
-      };
-      cur.kinds.add(h.tool_name);
-      if (h.event_time && (!cur.last_at || h.event_time > cur.last_at)) {
-        cur.last_at = h.event_time;
-        cur.last_event_id = h.event_id;
-        cur.last_tool = h.tool_name;
-      }
-      if (h.event_time && h.event_time < cur.first_at) {
-        cur.first_at = h.event_time;
-      }
-      const numLines = numberField(h.output, "numLines");
-      if (numLines > cur.lines) cur.lines = numLines;
-      cur.events.push(h);
-      map.set(path, cur);
-    }
-    const items = [...map.values()].sort((a, b) =>
-      String(b.last_at).localeCompare(String(a.last_at))
-    );
-    if (items.length === 0) return null;
-    return {
-      kind: "files",
-      title: "Files (cache)",
-      icon: "▤",
-      subtitle: "files the agent has read or written this session",
-      count: items.length,
-      last_touched: items[0].last_at,
-      items: items.map((f) => {
-        const kinds = [...f.kinds].sort();
-        const subtitleParts = [];
-        if (kinds.length) subtitleParts.push(kinds.join(" · "));
-        if (f.lines) subtitleParts.push(f.lines + " lines");
-        return {
-          id: "file-" + f.path,
-          title: f.path,
-          subtitle: subtitleParts.join(" · "),
-          event_id: f.last_event_id,
-          touched_at: f.last_at,
-          kind: "file",
-          tooltip:
-            "Path: " + f.path + "\n" +
-            "Last touched: " + formatFullTimestamp(f.last_at) + "\n" +
-            "First touched: " + formatFullTimestamp(f.first_at) + "\n" +
-            "Operations: " + kinds.join(", ") + "\n" +
-            (f.lines ? "Lines: " + f.lines + "\n" : "") +
-            "\nNote: the age below is our staleness signal, not a provider cache TTL. " +
-            "It refreshes the next time the agent touches this file.",
-        };
-      }),
-      empty_text: "No files were read or written.",
-      raw_events: items.map((f) => f.last_event_id).filter(Boolean),
-    };
-  }
-
-  function buildCommandsBlock(timeline, hooks) {
+  /** Skills: skills called via the SkillTool. We surface them as items
+   *  with their frontmatter. */
+  function buildSkillsCategory(hooks) {
     const items = [];
     for (const h of hooks || []) {
-      if (h.kind !== "tool" || h.tool_name !== "Bash") continue;
+      if (!h || h.kind !== "tool") continue;
+      if (h.tool_name !== "Skill" && h.tool_name !== "SlashCommand" && h.tool_name !== "SkillTool") continue;
       const input = h.input || {};
-      const command = input.command || input.description || "";
-      const exit = numberField(h.output, "exitCode");
-      items.push({
-        id: "cmd-" + h.event_id,
-        title: firstLine(input.description || command, 100),
-        subtitle: exit != null ? "exit " + exit : (h.status === "error" ? "failed" : ""),
-        event_id: h.event_id,
-        touched_at: h.event_time,
-        kind: "command",
-        tooltip:
-          "Command: " + firstLine(command, 500) + "\n" +
-          "When: " + formatFullTimestamp(h.event_time) + "\n" +
-          (exit != null ? "Exit: " + exit + "\n" : "") +
-          (h.status ? "Status: " + h.status : ""),
-      });
+      const name = typeof input.name === "string" ? input.name
+        : typeof input.skill === "string" ? input.skill
+        : typeof input.command === "string" ? input.command
+        : "skill";
+      items.push({ id: "skill:" + (h.event_id || name), text: name, subtitle: h.summary || "" });
     }
     if (items.length === 0) return null;
-    items.sort((a, b) => String(b.touched_at).localeCompare(String(a.touched_at)));
-    return {
-      kind: "commands",
-      title: "Commands",
-      icon: "$",
-      subtitle: "Bash commands run by the agent",
-      count: items.length,
-      last_touched: items[0].touched_at,
-      items,
-      empty_text: "No commands run.",
-      raw_events: items.map((i) => i.event_id),
-    };
+    return { name: "Skills", kind: "skills", tokens: 0, items };
   }
 
-  function buildSearchesBlock(timeline, hooks) {
-    const items = [];
+  /** Messages: the bulk. Each message becomes a clickable block in the
+   *  message-grid. We pair Pre/Post tool events by tool_use_id, then
+   *  bucket the result by its associated assistant response (if any) so
+   *  cache stats can be attributed. */
+  function buildMessages(hooks, apiUsage) {
+    // Pair Pre/Post by tool_use_id, similar to the Go-side buildToolSummary.
+    const preById = new Map();
+    const postById = new Map();
     for (const h of hooks || []) {
-      if (h.kind !== "tool") continue;
-      if (h.tool_name !== "WebFetch" && h.tool_name !== "WebSearch" && h.tool_name !== "Glob" && h.tool_name !== "Grep") {
-        continue;
-      }
-      const input = h.input || {};
-      const text = input.query || input.url || input.pattern || "";
-      items.push({
-        id: "search-" + h.event_id,
-        title: h.tool_name + ": " + firstLine(text, 100),
-        subtitle: h.tool_name === "Glob" || h.tool_name === "Grep" ? (input.path || "") : "",
-        event_id: h.event_id,
-        touched_at: h.event_time,
-        kind: "search",
-        tooltip: h.tool_name + ": " + text + "\nWhen: " + formatFullTimestamp(h.event_time),
-      });
+      if (!h || h.kind !== "tool") continue;
+      const id = h.tool_use_id || "";
+      if (!id) continue;
+      if (h.event_name === "PreToolUse") preById.set(id, h);
+      else if (h.event_name === "PostToolUse") postById.set(id, h);
     }
-    if (items.length === 0) return null;
-    items.sort((a, b) => String(b.touched_at).localeCompare(String(a.touched_at)));
-    return {
-      kind: "searches",
-      title: "Searches",
-      icon: "⌕",
-      subtitle: "web searches, fetches, and file queries",
-      count: items.length,
-      last_touched: items[0].touched_at,
-      items,
-      empty_text: "No searches run.",
-      raw_events: items.map((i) => i.event_id),
-    };
-  }
-
-  function buildSkillsBlock(timeline, hooks) {
-    // No provider sends skill paths through the hook stream. Show the
-    // session's permission_mode + first cwd as the only "skills" data we
-    // have, and be explicit that this is best-effort.
-    const firstStart = findFirst(hooks, (h) => h.event_name === "SessionStart");
-    if (!firstStart) return null;
-    const items = [];
-    if (firstStart.cwd) {
-      items.push({
-        id: "skill-cwd",
-        title: "Working dir: " + firstStart.cwd,
-        subtitle: "project root the agent started in",
-        event_id: firstStart.event_id,
-        touched_at: firstStart.event_time,
-        kind: "skill",
-        tooltip: "The cwd the agent was started in. " +
-          "Project-local skills (Claude: .claude/skills, Pi: .pi/skills, " +
-          "Codex: AGENTS.md) load from this tree, but the hook payload " +
-          "doesn't list them.",
-      });
-    }
-    if (firstStart.transcript_path) {
-      items.push({
-        id: "skill-transcript",
-        title: "Transcript: " + firstStart.transcript_path,
-        subtitle: "session log location",
-        event_id: firstStart.event_id,
-        touched_at: firstStart.event_time,
-        kind: "skill",
-        tooltip: "Path to the session's transcript. The provider's skills " +
-          "and memory are loaded next to this file by the agent runtime, " +
-          "not surfaced in the hook stream.",
-      });
-    }
-    if (items.length === 0) return null;
-    return {
-      kind: "skills",
-      title: "Skills & memory",
-      icon: "✦",
-      subtitle: "best-effort from the session payload",
-      count: items.length,
-      last_touched: items[0].touched_at,
-      items,
-      empty_text: "No skill or memory info captured.",
-      raw_events: items.filter((i) => i.event_id).map((i) => i.event_id),
-    };
-  }
-
-  function buildTurnsBlock(timeline, hooks) {
-    // The existing per-turn grouping, presented as a single block. The
-    // caller can still drop down to the "view timeline" toggle for the
-    // per-event details.
-    const turns = (timeline && timeline.turns) || [];
-    if (turns.length === 0) return null;
-    const last = turns[turns.length - 1];
-    const items = turns.map((t, i) => {
-      const lastEv = t.tools && t.tools.length ? t.tools[t.tools.length - 1] : t.response;
-      return {
-        id: "turn-" + i,
-        title: "Turn " + (i + 1) + ": " + (t.prompt ? firstLine(t.prompt.content || t.prompt.summary || "(no prompt)", 80) : "(tool-only)"),
-        subtitle: (t.tools || []).length + " tool" + ((t.tools || []).length === 1 ? "" : "s"),
-        event_id: lastEv ? lastEv.event_id : (t.prompt ? t.prompt.event_id : null),
-        touched_at: t.ended_at || t.started_at,
-        kind: "turn",
-        tooltip:
-          "Started: " + formatFullTimestamp(t.started_at) + "\n" +
-          "Ended: " + formatFullTimestamp(t.ended_at) + "\n" +
-          "Tools: " + (t.tools || []).length,
-      };
-    });
-    return {
-      kind: "turns",
-      title: "Turns",
-      icon: "↻",
-      subtitle: "prompt → tool calls → assistant",
-      count: turns.length,
-      last_touched: last ? (last.ended_at || last.started_at) : "",
-      items,
-      empty_text: "No turns in this session.",
-      raw_events: items.map((i) => i.event_id).filter(Boolean),
-    };
-  }
-
-  function buildCompactsBlock(timeline, hooks) {
-    const items = [];
+    const consumed = new Set();
+    const merged = [];
     for (const h of hooks || []) {
-      if (h.kind !== "compact") continue;
-      const trigger = stringField(h, "trigger") || stringField(h.input, "trigger");
-      items.push({
-        id: "compact-" + h.event_id,
-        title: "Compact: " + (trigger || h.event_name),
-        subtitle: "",
-        event_id: h.event_id,
-        touched_at: h.event_time,
-        kind: "compact",
-        tooltip: "Compaction event. " +
-          "The hook payload doesn't include what was dropped.\n" +
-          "When: " + formatFullTimestamp(h.event_time),
-      });
+      if (!h || h.kind !== "tool") continue;
+      const id = h.tool_use_id || "";
+      if (id && consumed.has(id)) continue;
+      if (id) consumed.add(id);
+      merged.push({ pre: preById.get(id) || null, post: postById.get(id) || null });
     }
-    if (items.length === 0) return null;
-    items.sort((a, b) => String(a.touched_at).localeCompare(String(b.touched_at)));
-    return {
-      kind: "compacts",
-      title: "Compacts",
-      icon: "↦",
-      subtitle: "context compaction events",
-      count: items.length,
-      last_touched: items[items.length - 1].touched_at,
-      items,
-      empty_text: "No compactions.",
-      raw_events: items.map((i) => i.event_id),
-    };
-  }
 
-  function buildNotesBlock(timeline, hooks) {
-    const items = [];
+    // Bucket: each merged tool pair belongs to the LAST preceding user/assistant
+    // message; orphan tools go in their own bucket. For cache attribution we
+    // treat every event between two Stop markers as one bucket.
+    const buckets = [];
+    let current = { id: "bucket-pre", label: "preamble", start: null, events: [] };
+    for (const m of merged) {
+      const ev = m.post || m.pre;
+      if (!ev) continue;
+      if (!current.start) current.start = ev.event_time;
+      current.events.push(m);
+    }
+    if (current.events.length) buckets.push(current);
+
+    // Walk all hooks in chronological order and build message blocks.
+    const blocks = [];
     for (const h of hooks || []) {
-      if (h.kind === "notification") {
-        items.push({
-          id: "note-" + h.event_id,
-          title: "Notification: " + (h.summary || h.content || h.event_name),
-          subtitle: "",
-          event_id: h.event_id,
-          touched_at: h.event_time,
-          kind: "note",
-          tooltip: formatFullTimestamp(h.event_time),
+      if (!h) continue;
+      if (h.kind === "user_prompt") {
+        const txt = (h.content || h.summary || "").toString();
+        blocks.push({
+          id: "m:" + (h.event_id || "u" + blocks.length),
+          kind: "user",
+          text: txt,
+          tool_name: "",
+          tokens: 0, // filled async
+          touched_at: h.event_time || null,
+          event_id: h.event_id || null,
+          cache: { hit_count: 0, expires_at: null, ttl_kind: null },
         });
-      } else if (h.kind === "permission_request") {
-        items.push({
-          id: "perm-" + h.event_id,
-          title: "Permission request: " + (h.tool_name || h.summary || ""),
-          subtitle: "",
-          event_id: h.event_id,
-          touched_at: h.event_time,
-          kind: "note",
-          tooltip: formatFullTimestamp(h.event_time),
+      } else if (h.kind === "assistant_stop") {
+        const txt = (h.content || h.summary || "").toString();
+        blocks.push({
+          id: "m:" + (h.event_id || "a" + blocks.length),
+          kind: "assistant",
+          text: txt,
+          tool_name: "",
+          tokens: 0,
+          touched_at: h.event_time || null,
+          event_id: h.event_id || null,
+          cache: { hit_count: 0, expires_at: null, ttl_kind: null },
         });
-      } else if (h.kind === "session_start") {
-        items.push({
-          id: "ss-" + h.event_id,
-          title: "Session start" + (h.reason ? ": " + h.reason : ""),
-          subtitle: "",
-          event_id: h.event_id,
-          touched_at: h.event_time,
-          kind: "note",
-          tooltip: formatFullTimestamp(h.event_time),
-        });
-      } else if (h.kind === "session_end") {
-        items.push({
-          id: "se-" + h.event_id,
-          title: "Session end" + (h.reason ? ": " + h.reason : ""),
-          subtitle: "",
-          event_id: h.event_id,
-          touched_at: h.event_time,
-          kind: "note",
-          tooltip: formatFullTimestamp(h.event_time),
-        });
-      } else if (h.kind === "tool" && h.status === "error") {
-        items.push({
-          id: "err-" + h.event_id,
-          title: "Error: " + (h.tool_name || "tool") + " — " + (h.error || h.summary || "failed"),
-          subtitle: "",
-          event_id: h.event_id,
-          touched_at: h.event_time,
-          kind: "note",
-          tooltip: formatFullTimestamp(h.event_time),
-        });
+      } else if (h.kind === "tool" && (h.event_name === "PreToolUse" || h.event_name === "PostToolUse")) {
+        // Skip individual tool events — they're represented via the
+        // merged map of (pre, post) pairs below.
       }
     }
-    if (items.length === 0) return null;
-    items.sort((a, b) => String(b.touched_at).localeCompare(String(a.touched_at)));
-    return {
-      kind: "notes",
-      title: "Notes & errors",
-      icon: "!",
-      subtitle: "notifications, permission requests, session lifecycle, tool errors",
-      count: items.length,
-      last_touched: items[0].touched_at,
-      items,
-      empty_text: "Nothing to report.",
-      raw_events: items.map((i) => i.event_id),
-    };
+
+    // Add a merged-tool block for each tool_use_id, so the user sees the
+    // call + result as a single unit.
+    for (const m of merged) {
+      const pre = m.pre;
+      const post = m.post;
+      const ev = post || pre;
+      if (!ev) continue;
+      const id = ev.tool_use_id || "tu" + blocks.length;
+      const input = (pre && pre.input) || {};
+      const result = (post && post.output) || (pre && pre.output) || null;
+      let subtitle = "";
+      if (input && typeof input === "object") {
+        if (typeof input.file_path === "string") subtitle = input.file_path;
+        else if (typeof input.command === "string") subtitle = firstLine(input.command, 80);
+        else if (typeof input.url === "string") subtitle = input.url;
+        else if (typeof input.pattern === "string") subtitle = input.pattern;
+      }
+      blocks.push({
+        id: "m:" + id,
+        kind: "tool_call",
+        text: ev.tool_name || "tool",
+        subtitle,
+        tool_name: ev.tool_name || "",
+        input,
+        output: result,
+        tokens: 0,
+        touched_at: ev.event_time || null,
+        event_id: ev.event_id || null,
+        cache: { hit_count: 0, expires_at: null, ttl_kind: null },
+      });
+    }
+
+    // Apply cache stats: if apiUsage.cache_creation_input_tokens > 0, the
+    // FIRST block is a new cache entry; cache_read_input_tokens > 0 means
+    // subsequent blocks in the window hit the cache. Without per-block
+    // attribution, we approximate: split the cache_read evenly across the
+    // last N blocks where N is the count of blocks in the last 5 minutes.
+    if (apiUsage && apiUsage.present) {
+      const last5minBlocks = blocks.filter((b) => {
+        if (!b.touched_at) return false;
+        const t = Date.parse(b.touched_at);
+        if (isNaN(t)) return false;
+        return Date.now() - t < 5 * 60_000;
+      });
+      const hitCount = apiUsage.cache_read_input_tokens || 0;
+      const creates = (apiUsage.cache_creation && apiUsage.cache_creation.ephemeral_5m_input_tokens) || 0;
+      const ttlKind = creates > 0 ? "5m" : null;
+      // Distribute the cache_read_total across the last-5min blocks as
+      // a synthetic hit_count. We don't know which block specifically
+      // hit the cache; a uniform split is honest about that uncertainty.
+      const perBlock = last5minBlocks.length > 0 ? Math.round(hitCount / last5minBlocks.length) : 0;
+      for (const b of last5minBlocks) {
+        b.cache.hit_count = perBlock;
+        b.cache.ttl_kind = ttlKind;
+        if (b.touched_at) {
+          b.cache.expires_at = new Date(Date.parse(b.touched_at) + 5 * 60_000).toISOString();
+        }
+      }
+    }
+
+    // File re-read proxy: every additional Read on the same file counts
+    // as a cache hit when we don't have real cache_read data.
+    if (!(apiUsage && apiUsage.present && apiUsage.cache_read_input_tokens > 0)) {
+      const readByFile = new Map();
+      for (const b of blocks) {
+        if (b.kind !== "tool_call" || b.tool_name !== "Read") continue;
+        const p = b.subtitle || "";
+        if (!p) continue;
+        const cur = readByFile.get(p) || 0;
+        readByFile.set(p, cur + 1);
+        b.cache.hit_count = cur; // 0 for first read, 1 for second, etc.
+      }
+    }
+
+    return blocks;
   }
 
-  // ---------- Public aggregator ------------------------------------------
+  // ---------- Main aggregator -----------------------------------------------
 
-  function buildContextBlocks(timeline, allHooks, opts) {
-    const now = (opts && typeof opts.now === "number") ? opts.now : Date.now();
+  /** Build the full Context Usage Map. Async because token counts need
+   *  the CDN tokenizer to settle. */
+  async function buildContextUsageMap(timeline, allHooks, opts) {
+    opts = opts || {};
+    const now = (typeof opts.now === "number") ? opts.now : Date.now();
     const sessionID = (timeline && timeline.session && timeline.session.id) || "";
     const hooks = filterSessionHooks(allHooks, sessionID);
+    const model = (opts.model) || inferModel(hooks);
+    const provider = inferProvider(findFirstPayload(hooks));
+    const maxTokens = getContextWindowForModel(model);
 
-    const blocks = [
-      buildSessionBlock(timeline, hooks),
-      buildInstructionsBlock(timeline, hooks),
-      buildToolsBlock(timeline, hooks),
-      buildFilesBlock(timeline, hooks),
-      buildCommandsBlock(timeline, hooks),
-      buildSearchesBlock(timeline, hooks),
-      buildSkillsBlock(timeline, hooks),
-      buildTurnsBlock(timeline, hooks),
-      buildCompactsBlock(timeline, hooks),
-      buildNotesBlock(timeline, hooks),
-    ].filter(Boolean);
+    const sysCat  = buildSystemPromptCategory(hooks);
+    const toolsCat = buildSystemToolsCategory(hooks);
+    const skillsCat = buildSkillsCategory(hooks);
+    const apiUsage = extractAPIUsage(hooks);
+    const messages = buildMessages(hooks, apiUsage);
+    const messagesCategory = {
+      name: "Messages",
+      kind: "messages",
+      tokens: 0,
+      items: messages,
+      message_blocks: messages,
+    };
 
-    // Pre-compute staleness tone and age on every item, so the renderer
-    // doesn't have to.
-    for (const b of blocks) {
-      for (const it of b.items) {
-        const ts = it.touched_at ? new Date(it.touched_at).getTime() : NaN;
-        it.age_ms = isNaN(ts) ? null : Math.max(0, now - ts);
-        it.age_text = formatAge(it.age_ms);
-        it.tone = stalenessTone(it.kind, it.age_ms);
-      }
-      if (b.last_touched) {
-        const ts = new Date(b.last_touched).getTime();
-        b.age_ms = isNaN(ts) ? null : Math.max(0, now - ts);
-        b.age_text = formatAge(b.age_ms);
-        b.tone = stalenessTone("block", b.age_ms);
-      } else {
-        b.age_text = "—";
-        b.tone = "fresh";
+    // Token-count every category in parallel. We await all so the totals
+    // are ready before the renderer sees them. Skills can be null when
+    // no SkillTool events were observed; skip it cleanly.
+    const allText = [];
+    for (const c of [sysCat, toolsCat, skillsCat, messagesCategory]) {
+      if (!c) continue;
+      for (const it of c.items || []) {
+        allText.push((it && it.text) || "");
       }
     }
-    return { blocks, provider: inferProvider(extractFirstPayload(hooks)) };
+    const allCounts = await Promise.all(allText.map((t) => countTokens(t, model)));
+
+    // Distribute the per-item counts back.
+    let idx = 0;
+    const tokenize = (cat) => {
+      let sum = 0;
+      for (const it of cat.items || []) {
+        const n = allCounts[idx++] || 0;
+        it.tokens = n;
+        sum += n;
+      }
+      cat.tokens = sum;
+    };
+    tokenize(sysCat);
+    tokenize(toolsCat);
+    if (skillsCat) tokenize(skillsCat);
+    tokenize(messagesCategory);
+
+    const categories = [
+      sysCat, toolsCat, skillsCat, messagesCategory,
+    ].filter((c) => c && (c.tokens > 0 || (c.items && c.items.length > 0)));
+
+    const totalTokens = categories.reduce((s, c) => s + c.tokens, 0);
+    const percentage = maxTokens > 0 ? (totalTokens / maxTokens) : 0;
+
+    // Build the grid: TOTAL_SQUARES cells, token-proportional. We pack
+    // category → count of cells, then fill each cell with the category's
+    // color. For "Messages" cells, we layer in cache-info so the renderer
+    // can vary per-cell.
+    const TOTAL_SQUARES = 100;
+    const gridSquares = [];
+    for (const cat of categories) {
+      if (cat.tokens <= 0) continue;
+      const exact = (cat.tokens / Math.max(maxTokens, 1)) * TOTAL_SQUARES;
+      const whole = Math.floor(exact);
+      const frac = exact - whole;
+      for (let i = 0; i < whole; i++) {
+        gridSquares.push(makeSquare(cat, i, whole, 1.0, model));
+      }
+      if (frac > 0) {
+        gridSquares.push(makeSquare(cat, whole, whole, frac, model));
+      }
+    }
+    // Free space: pad the grid up to TOTAL_SQUARES with outlined free cells.
+    while (gridSquares.length < TOTAL_SQUARES) {
+      gridSquares.push({
+        color: "free",
+        isFilled: false,
+        categoryName: "Free space",
+        tokens: 0,
+        percentage: 0,
+        squareFullness: 0,
+        kind: "free",
+      });
+    }
+    // Autocompact buffer at the end (decorative; the actual model window
+    // already accounts for this — we mark it as a visual hint).
+    if (gridSquares.length > TOTAL_SQUARES) {
+      gridSquares.length = TOTAL_SQUARES;
+    }
+    // Split into rows of 10.
+    const GRID_WIDTH = 10;
+    const gridRows = [];
+    for (let i = 0; i < gridSquares.length; i += GRID_WIDTH) {
+      gridRows.push(gridSquares.slice(i, i + GRID_WIDTH));
+    }
+
+    return {
+      model,
+      provider,
+      totalTokens,
+      maxTokens,
+      percentage,
+      categories,
+      gridRows,
+      apiUsage: apiUsage.present ? {
+        input_tokens: apiUsage.input_tokens,
+        output_tokens: apiUsage.output_tokens,
+        cache_creation_input_tokens: apiUsage.cache_creation_input_tokens,
+        cache_read_input_tokens: apiUsage.cache_read_input_tokens,
+        cache_creation: apiUsage.cache_creation,
+      } : null,
+      messages,
+    };
   }
 
-  // ---------- Render ------------------------------------------------------
-
-  function escapeHtml(s) {
-    return String(s == null ? "" : s)
-      .replaceAll("&", "&amp;")
-      .replaceAll("<", "&lt;")
-      .replaceAll(">", "&gt;")
-      .replaceAll('"', "&quot;")
-      .replaceAll("'", "&#39;");
+  function makeSquare(cat, indexInCat, totalInCat, fullness, model) {
+    return {
+      color: cat.kind,
+      isFilled: fullness > 0,
+      categoryName: cat.name,
+      tokens: Math.round(cat.tokens * (fullness / totalInCat || 0)),
+      percentage: 0, // filled in renderer if needed
+      squareFullness: fullness,
+      kind: cat.kind,
+    };
   }
 
-  function renderContextView(blocks, container, callbacks) {
-    // callbacks: { onItemClick, onRawClick }
+  // ---------- Renderer -------------------------------------------------------
+
+  // Cache TTL palette: red (expired) → amber (halfway) → green (fresh).
+  // The first expiry is 5 minutes after the block's last touch; subsequent
+  // hits refresh the window (which is what cache_read does). For blocks
+  // without a real expires_at (e.g. pre-usage events) we don't color.
+  function cacheTone(cache, now) {
+    if (!cache || !cache.expires_at) return null;
+    const exp = Date.parse(cache.expires_at);
+    if (isNaN(exp)) return null;
+    const remaining = exp - now;
+    if (remaining <= 0) return "expired";
+    if (remaining < 60_000) return "soon";          // < 1 min remaining
+    if (remaining < 5 * 60_000) return "fresh";     // < 5 min remaining
+    return "fresh-long";
+  }
+
+  // Block size: a base radius + hit_count * step. Capped at 1.4× so blocks
+  // don't dominate the grid. Blocks with no hits keep the base size.
+  function blockSizePx(hitCount) {
+    const base = 8;
+    const step = Math.min(8, hitCount || 0);
+    return base + step;
+  }
+
+  // Click handler registry: each message block has a `data-block-id` and
+  // the container catches clicks and dispatches to the registered handler.
+  let clickHandler = null;
+
+  function renderContextUsageMap(data, container, callbacks) {
+    callbacks = callbacks || {};
     container.textContent = "";
-    if (!blocks || blocks.length === 0) {
+    if (!data || !data.categories || data.categories.length === 0) {
       const empty = document.createElement("div");
-      empty.className = "empty";
+      empty.className = "ctx-empty";
       empty.textContent = "No context captured for this session yet.";
       container.appendChild(empty);
       return;
     }
-    for (const b of blocks) {
-      container.appendChild(renderBlock(b, callbacks));
-    }
-  }
 
-  function renderBlock(block, callbacks) {
-    const wrap = document.createElement("section");
-    wrap.className = "ctx-block ctx-block--" + block.kind + " tone-" + (block.tone || "fresh");
-    wrap.dataset.kind = block.kind;
-
-    const header = document.createElement("header");
-    header.className = "ctx-block__header";
-
-    const title = document.createElement("div");
-    title.className = "ctx-block__title";
-    const icon = document.createElement("span");
-    icon.className = "ctx-block__icon";
-    icon.textContent = block.icon || "·";
-    const titleText = document.createElement("span");
-    titleText.textContent = block.title;
-    title.append(icon, titleText);
-    if (block.count > 0) {
-      const count = document.createElement("span");
-      count.className = "ctx-block__count";
-      count.textContent = block.count;
-      title.appendChild(count);
+    // --- Header ------------------------------------------------------------
+    const header = document.createElement("div");
+    header.className = "ctx-header";
+    const title = document.createElement("h2");
+    title.className = "ctx-header__title";
+    title.textContent = "Context Usage";
+    const sub = document.createElement("div");
+    sub.className = "ctx-header__sub";
+    const pct = (data.percentage * 100).toFixed(1);
+    sub.innerHTML = "";
+    const modelSpan = document.createElement("span");
+    modelSpan.className = "ctx-header__model";
+    modelSpan.textContent = data.model || "unknown model";
+    const sep1 = document.createElement("span");
+    sep1.textContent = " · ";
+    const tokensSpan = document.createElement("span");
+    tokensSpan.className = "ctx-header__tokens";
+    tokensSpan.textContent = formatTokens(data.totalTokens) + " / " + formatTokens(data.maxTokens) + " tokens (" + pct + "%)";
+    sub.append(modelSpan, sep1, tokensSpan);
+    if (data.apiUsage && data.apiUsage.cache_read_input_tokens > 0) {
+      const cacheSpan = document.createElement("span");
+      cacheSpan.className = "ctx-header__cache";
+      const cached = data.apiUsage.cache_read_input_tokens;
+      const created = data.apiUsage.cache_creation_input_tokens || 0;
+      cacheSpan.textContent = " · " + formatTokens(cached) + " cache hits (" + formatTokens(created) + " created)";
+      sub.appendChild(cacheSpan);
     }
-    header.appendChild(title);
+    header.append(title, sub);
+    container.appendChild(header);
 
-    const meta = document.createElement("div");
-    meta.className = "ctx-block__meta";
-    if (block.subtitle) {
-      const sub = document.createElement("span");
-      sub.className = "ctx-block__subtitle";
-      sub.textContent = block.subtitle;
-      meta.appendChild(sub);
-    }
-    if (block.last_touched && block.kind !== "session") {
-      const age = document.createElement("span");
-      age.className = "ctx-block__age chip tone-" + (block.tone || "fresh");
-      age.textContent = block.age_text + " ago";
-      age.title = "Last touched: " + formatFullTimestamp(block.last_touched);
-      meta.appendChild(age);
-    }
-    if (block.raw_events && block.raw_events.length) {
-      const raw = document.createElement("button");
-      raw.type = "button";
-      raw.className = "btn";
-      raw.textContent = "View raw";
-      raw.addEventListener("click", () => {
-        if (callbacks && callbacks.onRawClick) callbacks.onRawClick(block.raw_events);
-      });
-      meta.appendChild(raw);
-    }
-    header.appendChild(meta);
-    wrap.appendChild(header);
-
-    const body = document.createElement("div");
-    body.className = "ctx-block__body";
-    if (!block.items || block.items.length === 0) {
-      const empty = document.createElement("div");
-      empty.className = "ctx-block__empty";
-      empty.textContent = block.empty_text || "Nothing.";
-      body.appendChild(empty);
-    } else {
-      const list = document.createElement("ul");
-      list.className = "ctx-item-list";
-      for (const it of block.items) {
-        list.appendChild(renderItem(it, block, callbacks));
+    // --- Grid (one continuous strip of squares) ---------------------------
+    const grid = document.createElement("div");
+    grid.className = "ctx-grid";
+    grid.dataset.kind = "grid";
+    let squareIdx = 0;
+    for (let r = 0; r < data.gridRows.length; r++) {
+      const row = document.createElement("div");
+      row.className = "ctx-grid__row";
+      for (let c = 0; c < data.gridRows[r].length; c++) {
+        const sq = data.gridRows[r][c];
+        const cell = document.createElement("div");
+        cell.className = "ctx-grid__cell ctx-grid__cell--" + (sq.color || "free");
+        if (sq.isFilled) {
+          cell.style.opacity = (0.4 + 0.6 * sq.squareFullness).toFixed(2);
+        } else {
+          cell.classList.add("ctx-grid__cell--free");
+        }
+        cell.title = sq.categoryName + " · " + formatTokens(sq.tokens);
+        row.appendChild(cell);
+        squareIdx++;
       }
-      body.appendChild(list);
+      grid.appendChild(row);
     }
-    wrap.appendChild(body);
-    return wrap;
+    container.appendChild(grid);
+
+    // --- Message grid (per-message blocks, colored by cache TTL, sized by
+    //     hit count) -------------------------------------------------------
+    if (data.messages && data.messages.length > 0) {
+      const msgWrap = document.createElement("div");
+      msgWrap.className = "ctx-msgs";
+      const msgHeader = document.createElement("div");
+      msgHeader.className = "ctx-msgs__header";
+      const mh = document.createElement("span");
+      mh.className = "ctx-msgs__title";
+      mh.textContent = "Message blocks";
+      const mhSub = document.createElement("span");
+      mhSub.className = "ctx-msgs__sub";
+      mhSub.textContent = "color = cache expiration · size = cache hits · click for content";
+      msgHeader.append(mh, mhSub);
+      msgWrap.appendChild(msgHeader);
+
+      const msgGrid = document.createElement("div");
+      msgGrid.className = "ctx-msg-grid";
+      for (const b of data.messages) {
+        const cell = document.createElement("button");
+        cell.type = "button";
+        cell.className = "ctx-msg ctx-msg--" + b.kind;
+        const tone = cacheTone(b.cache, Date.now());
+        if (tone) cell.classList.add("ctx-msg--ttl-" + tone);
+        cell.dataset.blockId = b.id;
+        const hits = (b.cache && b.cache.hit_count) || 0;
+        const sz = blockSizePx(hits);
+        cell.style.width = sz + "px";
+        cell.style.height = sz + "px";
+        // Tooltip with the message details + cache info.
+        const tipParts = [];
+        tipParts.push(b.kind + (b.tool_name ? " · " + b.tool_name : ""));
+        if (b.text) tipParts.push(firstLine(b.text, 80));
+        if (b.tokens) tipParts.push(formatTokens(b.tokens) + " tokens");
+        if (hits > 0) tipParts.push(hits + " cache hit" + (hits === 1 ? "" : "s"));
+        if (b.cache && b.cache.ttl_kind) tipParts.push("ttl " + b.cache.ttl_kind);
+        if (b.cache && b.cache.expires_at) {
+          const rem = Math.max(0, Date.parse(b.cache.expires_at) - Date.now());
+          tipParts.push("expires in " + formatAge(rem));
+        }
+        cell.title = tipParts.join("\n");
+        msgGrid.appendChild(cell);
+      }
+      msgWrap.appendChild(msgGrid);
+      container.appendChild(msgWrap);
+
+      // Wire up click → dialog. The dialog itself lives in index.html.
+      msgGrid.addEventListener("click", (e) => {
+        const t = e.target.closest("[data-block-id]");
+        if (!t) return;
+        const id = t.dataset.blockId;
+        const block = data.messages.find((b) => b.id === id);
+        if (block && callbacks.onItemClick) callbacks.onItemClick(block);
+      });
+    }
+
+    // --- Per-category list ------------------------------------------------
+    const list = document.createElement("div");
+    list.className = "ctx-cats";
+    for (const c of data.categories) {
+      const row = document.createElement("div");
+      row.className = "ctx-cat ctx-cat--" + c.kind;
+      const left = document.createElement("div");
+      left.className = "ctx-cat__left";
+      const name = document.createElement("span");
+      name.className = "ctx-cat__name";
+      name.textContent = c.name;
+      const tokens = document.createElement("span");
+      tokens.className = "ctx-cat__tokens";
+      tokens.textContent = formatTokens(c.tokens);
+      const pctSpan = document.createElement("span");
+      pctSpan.className = "ctx-cat__pct";
+      pctSpan.textContent = ((c.tokens / Math.max(data.maxTokens, 1)) * 100).toFixed(1) + "%";
+      left.append(name, tokens, pctSpan);
+
+      const bar = document.createElement("div");
+      bar.className = "ctx-cat__bar";
+      const fill = document.createElement("div");
+      fill.className = "ctx-cat__bar-fill ctx-cat__bar-fill--" + c.kind;
+      fill.style.width = Math.min(100, (c.tokens / Math.max(data.maxTokens, 1)) * 100) + "%";
+      bar.appendChild(fill);
+
+      const wrap = document.createElement("div");
+      wrap.className = "ctx-cat__row";
+      wrap.append(left, bar);
+      row.appendChild(wrap);
+      list.appendChild(row);
+    }
+    container.appendChild(list);
   }
 
-  function renderItem(item, block, callbacks) {
-    const li = document.createElement("li");
-    li.className = "ctx-item tone-" + (item.tone || "fresh");
-    li.dataset.eventId = item.event_id || "";
-    li.dataset.blockKind = block.kind;
+  // ---------- Helpers -------------------------------------------------------
 
-    const main = document.createElement("button");
-    main.type = "button";
-    main.className = "ctx-item__main";
-    main.disabled = !item.event_id;
-    if (item.tooltip) {
-      main.title = item.tooltip;
-      main.dataset.tooltip = item.tooltip;
-    }
-    if (item.event_id && callbacks && callbacks.onItemClick) {
-      main.addEventListener("click", () => callbacks.onItemClick(item));
-    }
-
-    const title = document.createElement("span");
-    title.className = "ctx-item__title";
-    title.textContent = item.title;
-    main.appendChild(title);
-
-    if (item.subtitle) {
-      const sub = document.createElement("span");
-      sub.className = "ctx-item__subtitle";
-      sub.textContent = item.subtitle;
-      main.appendChild(sub);
-    }
-
-    const side = document.createElement("span");
-    side.className = "ctx-item__side";
-    if (item.touched_at && block.kind !== "session") {
-      const age = document.createElement("span");
-      age.className = "chip tone-" + (item.tone || "fresh");
-      age.textContent = item.age_text + " ago";
-      age.title = formatFullTimestamp(item.touched_at);
-      side.appendChild(age);
-    }
-    if (item.event_id) {
-      const arrow = document.createElement("span");
-      arrow.className = "ctx-item__arrow";
-      arrow.textContent = "→";
-      arrow.setAttribute("aria-hidden", "true");
-      side.appendChild(arrow);
-    }
-    main.appendChild(side);
-
-    li.appendChild(main);
-    return li;
+  function formatTokens(n) {
+    if (typeof n !== "number" || isNaN(n)) return "—";
+    if (n < 0) return "—";
+    if (n === 0) return "0";
+    if (n < 1000) return n + "";
+    if (n < 1_000_000) return (n / 1000).toFixed(n < 10000 ? 1 : 0) + "K";
+    return (n / 1_000_000).toFixed(1) + "M";
   }
 
-  // ---------- Self-tests --------------------------------------------------
+  function formatAge(ms) {
+    if (ms == null || ms < 0) return "—";
+    if (ms < 1000) return "<1s";
+    const s = Math.floor(ms / 1000);
+    if (s < 60) return s + "s";
+    const m = Math.floor(s / 60);
+    if (m < 60) return m + "m " + (s % 60) + "s";
+    const h = Math.floor(m / 60);
+    if (h < 24) return h + "h " + (m % 60) + "m";
+    const d = Math.floor(h / 24);
+    return d + "d " + (h % 24) + "h";
+  }
 
+  // ---------- Tests --------------------------------------------------------
+
+  /** In-page smoke tests. Read by the headless browser via
+   *  window.__traceframeTests (results are stashed on window; nothing
+   *  injected into the visible DOM). */
   function runTests() {
     const results = [];
-    const t = function (name, cond, detail) {
+    const t = (name, cond, detail) => {
       results.push((cond ? "PASS" : "FAIL") + " " + name + (detail ? " — " + detail : ""));
     };
 
-    // inferProvider basics
+    // Provider inference
     t("inferProvider: claude via transcript_path",
-      inferProvider({ transcript_path: "/Users/me/.claude/sessions/x.jsonl" }) === "claude",
-      "got=" + inferProvider({ transcript_path: "/Users/me/.claude/sessions/x.jsonl" }));
+      inferProvider({ transcript_path: "/Users/me/.claude/sessions/x.jsonl" }) === "claude");
     t("inferProvider: codex via cwd",
       inferProvider({ cwd: "/Users/me/.codex/work" }) === "codex");
     t("inferProvider: pi via source",
@@ -876,151 +809,79 @@
     t("inferProvider: unknown on empty",
       inferProvider({}) === "unknown");
 
-    // stalenessTone
-    t("stalenessTone file fresh <5m",
-      stalenessTone("file", 60_000) === "fresh");
-    t("stalenessTone file warm 5-30m",
-      stalenessTone("file", 10 * 60_000) === "warm");
-    t("stalenessTone file cold >30m",
-      stalenessTone("file", 60 * 60_000) === "cold");
-    t("stalenessTone tool warm 30m",
-      stalenessTone("tool", 30 * 60_000) === "warm");
+    // Model inference
+    t("inferModel: from assistant event",
+      inferModel([{ kind: "assistant_stop", model: "claude-opus-4-7" }]) === "claude-opus-4-7");
+    t("inferModel: from payload.model",
+      inferModel([{ kind: "tool", payload: { model: "gpt-4" } }]) === "gpt-4");
+    t("inferModel: empty fallback",
+      inferModel([]) === "");
 
-    // formatAge
-    t("formatAge <1s", formatAge(500) === "<1s");
-    t("formatAge seconds", formatAge(45_000) === "45s");
-    t("formatAge minutes", formatAge(125_000) === "2m 5s");
-    t("formatAge hours", formatAge(3_661_000) === "1h 1m");
+    // Context window lookup
+    t("context window: claude-opus-4-7 → 1M",
+      getContextWindowForModel("claude-opus-4-7") === 1_000_000);
+    t("context window: unknown → 200k default",
+      getContextWindowForModel("not-a-model") === 200_000);
 
-    // buildContextBlocks — minimal session with a Read and an Edit
-    const now = Date.parse("2026-07-06T12:00:00Z");
-    const hooks = [
-      // SessionStart
-      {
-        event_id: "ss1",
-        event_time: "2026-07-06T10:00:00Z",
-        event_name: "SessionStart",
-        session_id: "s1",
-        session_name: "demo",
-        kind: "session_start",
-        payload: { cwd: "/Users/me/proj", transcript_path: "/Users/me/.claude/sessions/s1.jsonl" },
-        transcript_path: "/Users/me/.claude/sessions/s1.jsonl",
-        cwd: "/Users/me/proj",
-        permission_mode: "acceptEdits",
-      },
-      // UserPromptSubmit
-      {
-        event_id: "p1",
-        event_time: "2026-07-06T10:00:05Z",
-        event_name: "UserPromptSubmit",
-        session_id: "s1",
-        session_name: "demo",
-        kind: "user_prompt",
-        content: "implement the foo function",
-        summary: "implement the foo function",
-      },
-      // Read on /Users/me/proj/main.go (1.5 hours ago, fresh)
-      {
-        event_id: "r1",
-        event_time: "2026-07-06T10:30:00Z",
-        event_name: "PreToolUse+PostToolUse",
-        session_id: "s1",
-        session_name: "demo",
-        kind: "tool",
-        tool_name: "Read",
-        status: "ok",
-        input: { file_path: "/Users/me/proj/main.go" },
-        output: { numLines: 200 },
-      },
+    // API usage extraction
+    const u = extractAPIUsage([
+      { kind: "assistant_stop", usage: { input_tokens: 1, cache_creation_input_tokens: 100, cache_read_input_tokens: 200, output_tokens: 5 } },
+    ]);
+    t("apiUsage: extracts cache_creation", u.cache_creation_input_tokens === 100);
+    t("apiUsage: extracts cache_read", u.cache_read_input_tokens === 200);
+    t("apiUsage: marks present", u.present === true);
+    t("apiUsage: empty when missing", extractAPIUsage([]).present === false);
 
-      // Edit on /Users/me/proj/main.go (4 min ago — should be fresh)
-      {
-        event_id: "e1",
-        event_time: "2026-07-06T11:56:00Z",
-        event_name: "PreToolUse+PostToolUse",
-        session_id: "s1",
-        session_name: "demo",
-        kind: "tool",
-        tool_name: "Edit",
-        status: "ok",
-        input: { file_path: "/Users/me/proj/main.go" },
-        output: {},
-      },
-      // Bash (10 min ago)
-      {
-        event_id: "b1",
-        event_time: "2026-07-06T11:50:00Z",
-        event_name: "PreToolUse+PostToolUse",
-        session_id: "s1",
-        session_name: "demo",
-        kind: "tool",
-        tool_name: "Bash",
-        status: "ok",
-        input: { command: "go test ./...", description: "run tests" },
-        output: { exitCode: 0 },
-      },
+    // Cache TTL tone
+    const nowT = Date.parse("2026-07-06T12:00:00Z");
+    t("cacheTone: no expires_at → null", cacheTone({}, nowT) === null);
+    t("cacheTone: expired → 'expired'",
+      cacheTone({ expires_at: new Date(nowT - 1000).toISOString() }, nowT) === "expired");
+    t("cacheTone: 30s remaining → 'soon'",
+      cacheTone({ expires_at: new Date(nowT + 30_000).toISOString() }, nowT) === "soon");
+    t("cacheTone: 4 min remaining → 'fresh'",
+      cacheTone({ expires_at: new Date(nowT + 4 * 60_000).toISOString() }, nowT) === "fresh");
+
+    // buildMessages: file re-read proxy
+    const mhooks = [
+      { kind: "user_prompt", event_id: "p1", event_time: "2026-07-06T10:00:00Z", content: "go" },
+      { kind: "tool", event_id: "r1", event_time: "2026-07-06T10:01:00Z", event_name: "PreToolUse", tool_name: "Read", tool_use_id: "t1", input: { file_path: "/a.go" } },
+      { kind: "tool", event_id: "r2", event_time: "2026-07-06T10:02:00Z", event_name: "PostToolUse", tool_name: "Read", tool_use_id: "t1", input: { file_path: "/a.go" } },
+      { kind: "tool", event_id: "r3", event_time: "2026-07-06T10:03:00Z", event_name: "PreToolUse", tool_name: "Read", tool_use_id: "t2", input: { file_path: "/a.go" } },
+      { kind: "tool", event_id: "r4", event_time: "2026-07-06T10:04:00Z", event_name: "PostToolUse", tool_name: "Read", tool_use_id: "t2", input: { file_path: "/a.go" } },
     ];
-    const timeline = {
-      session: {
-        id: "s1",
-        name: "demo",
-        started_at: "2026-07-06T10:00:00Z",
-        ended_at: "2026-07-06T11:55:00Z",
-        duration_ms: 105 * 60_000,
-        turn_count: 1,
-        tool_count: 3,
-        event_count: 5,
-        failure_count: 0,
-      },
-      turns: [],
-    };
-    const { blocks, provider } = buildContextBlocks(timeline, hooks, { now });
-    t("buildContextBlocks returns provider",
-      provider === "claude",
-      "got=" + provider);
-    const byKind = Object.fromEntries(blocks.map((b) => [b.kind, b]));
-    t("session block exists", !!byKind.session);
-    t("session block lists provider", byKind.session && byKind.session.items.some((i) => i.title.includes("claude")));
-    t("instructions block exists", !!byKind.instructions);
-    t("instructions block lists permission mode", byKind.instructions && byKind.instructions.items.some((i) => i.title.includes("acceptEdits")));
-    t("tools block has 3 unique tools", byKind.tools && byKind.tools.count === 3, "got=" + (byKind.tools && byKind.tools.count));
-    t("files block last touched is the Edit", byKind.files && byKind.files.last_touched === "2026-07-06T11:56:00Z");
-    t("files block staleness is fresh (4 min)", byKind.files && byKind.files.items[0].tone === "fresh", "tone=" + (byKind.files && byKind.files.items[0].tone));
-    t("commands block has 1", byKind.commands && byKind.commands.count === 1);
+    const msgs = buildMessages(mhooks, { present: false });
+    t("messages: includes user", msgs.some((b) => b.kind === "user"));
+    t("messages: tool calls are merged by tool_use_id",
+      msgs.filter((b) => b.kind === "tool_call").length === 2);
+    const reads = msgs.filter((b) => b.kind === "tool_call" && b.tool_name === "Read");
+    t("messages: re-read proxy: first read = 0 hits", reads[0] && reads[0].cache.hit_count === 0);
+    t("messages: re-read proxy: second read = 1 hit", reads[1] && reads[1].cache.hit_count === 1);
 
-    // Synthetic 1.5-hour-old file -> cold
-    const coldHooks = [{
-      event_id: "cold1",
-      event_time: "2026-07-06T10:30:00Z",
-      event_name: "PreToolUse+PostToolUse",
-      session_id: "s2",
-      session_name: "demo",
-      kind: "tool",
-      tool_name: "Read",
-      status: "ok",
-      input: { file_path: "/old/file.go" },
-      output: {},
-    }];
-    const coldTimeline = { session: { id: "s2", name: "demo", event_count: 1 }, turns: [] };
-    const { blocks: coldBlocks } = buildContextBlocks(coldTimeline, coldHooks, { now });
-    const coldFiles = coldBlocks.find((b) => b.kind === "files");
-    t("files staleness cold >30m",
-      coldFiles && coldFiles.items[0].tone === "cold",
-      "tone=" + (coldFiles && coldFiles.items[0].tone));
+    // formatTokens
+    t("formatTokens: 0 → '0'", formatTokens(0) === "0");
+    t("formatTokens: 500 → '500'", formatTokens(500) === "500");
+    t("formatTokens: 1500 → '1.5K'", formatTokens(1500) === "1.5K");
+    t("formatTokens: 1.2M → '1.2M'", formatTokens(1_200_000) === "1.2M");
 
     return results;
   }
 
-  // ---------- Export ------------------------------------------------------
+  // ---------- Export -------------------------------------------------------
 
   window.Traceframe = window.Traceframe || {};
   window.Traceframe.context = {
-    inferProvider,
-    stalenessTone,
-    formatAge,
-    formatFullTimestamp,
-    buildContextBlocks,
-    renderContextView,
+    // New surface (replaces the old buildContextBlocks / renderContextView).
+    buildContextUsageMap,
+    renderContextUsageMap,
     runTests,
+    // Public helpers, useful for the modal + smoke tests.
+    inferProvider,
+    inferModel,
+    getContextWindowForModel,
+    extractAPIUsage,
+    cacheTone,
+    formatTokens,
+    formatAge,
   };
 })();

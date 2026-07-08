@@ -21,12 +21,13 @@ import (
 	"time"
 )
 
-//go:embed static/index.html static/context.js
+//go:embed static/index.html static/context.js static/tokenizer.js
 var staticFiles embed.FS
 
 var (
-	indexHTML []byte
-	contextJS []byte
+	indexHTML   []byte
+	contextJS   []byte
+	tokenizerJS []byte
 )
 
 func init() {
@@ -36,6 +37,10 @@ func init() {
 		panic(err)
 	}
 	contextJS, err = staticFiles.ReadFile("static/context.js")
+	if err != nil {
+		panic(err)
+	}
+	tokenizerJS, err = staticFiles.ReadFile("static/tokenizer.js")
 	if err != nil {
 		panic(err)
 	}
@@ -162,6 +167,7 @@ func main() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", s.handleIndex)
 	mux.HandleFunc("/context.js", s.handleContextJS)
+	mux.HandleFunc("/tokenizer.js", s.handleTokenizerJS)
 	mux.HandleFunc("/healthz", s.handleHealth)
 	mux.HandleFunc("/api/hooks", s.handleHooksCollection)
 	mux.HandleFunc("/api/hooks/", s.handleHookByID)
@@ -185,6 +191,12 @@ func (s *server) handleContextJS(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("content-type", "application/javascript; charset=utf-8")
 	w.Header().Set("cache-control", "no-cache")
 	_, _ = w.Write(contextJS)
+}
+
+func (s *server) handleTokenizerJS(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("content-type", "application/javascript; charset=utf-8")
+	w.Header().Set("cache-control", "no-cache")
+	_, _ = w.Write(tokenizerJS)
 }
 
 func (s *server) handleHealth(w http.ResponseWriter, r *http.Request) {

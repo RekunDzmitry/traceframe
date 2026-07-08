@@ -862,144 +862,185 @@
         margin: 0;
         padding: 16px 18px 32px;
         display: grid;
-        gap: 12px;
+        gap: 18px;
       }
 
-      .ctx-block {
-        background: var(--panel);
-        border: 1px solid var(--border);
-        border-left: 4px solid var(--muted);
-        border-radius: 10px;
-        box-shadow: var(--shadow);
-        overflow: hidden;
-      }
-      .ctx-block--session { border-left-color: #202124; }
-      .ctx-block--instructions { border-left-color: #6b6f76; }
-      .ctx-block--tools { border-left-color: #0f766e; }
-      .ctx-block--files { border-left-color: #1f6feb; }
-      .ctx-block--commands { border-left-color: #953800; }
-      .ctx-block--searches { border-left-color: #8250df; }
-      .ctx-block--skills { border-left-color: #b35900; }
-      .ctx-block--turns { border-left-color: #1a7f37; }
-      .ctx-block--compacts { border-left-color: #9a6700; }
-      .ctx-block--notes { border-left-color: #b31d28; }
-
-      .ctx-block__header {
+      /* ----- Context Usage Map -------------------------------------- */
+      .ctx-header {
         display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 12px;
-        padding: 10px 14px;
-        border-bottom: 1px solid var(--border-soft);
-        background: var(--panel-alt);
+        flex-direction: column;
+        gap: 4px;
+        padding: 4px 4px 0;
       }
-      .ctx-block__title {
-        display: inline-flex;
-        align-items: center;
-        gap: 8px;
+      .ctx-header__title {
+        margin: 0;
+        font-size: 16px;
         font-weight: 800;
-        font-size: 14px;
+        letter-spacing: 0.02em;
       }
-      .ctx-block__icon {
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        width: 22px;
-        height: 22px;
-        border-radius: 50%;
-        background: var(--panel);
-        border: 1px solid var(--border-soft);
-        font-size: 12px;
+      .ctx-header__sub {
         color: var(--muted);
+        font-size: 12.5px;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
       }
-      .ctx-block__count {
-        background: #ecebe4;
-        color: #3f4247;
-        border-radius: 999px;
-        font-size: 11px;
-        font-weight: 800;
-        min-width: 22px;
-        padding: 1px 8px;
-        text-align: center;
+      .ctx-header__model {
+        font-weight: 700;
+        color: var(--fg);
       }
-      .ctx-block__meta {
-        display: inline-flex;
-        align-items: center;
-        gap: 10px;
-        color: var(--muted);
-        font-size: 12px;
+      .ctx-header__tokens {
+        font-variant-numeric: tabular-nums;
       }
-      .ctx-block__subtitle {
-        color: var(--muted);
-      }
-      .ctx-block__age {
+      .ctx-header__cache {
+        color: var(--success);
         font-variant-numeric: tabular-nums;
       }
 
-      .ctx-block__body {
-        padding: 4px 0 8px;
+      /* Grid of 100 token-sized squares (10x10). */
+      .ctx-grid {
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 12px;
+        box-shadow: var(--shadow);
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
       }
-      .ctx-block__empty {
-        padding: 12px 16px 14px;
-        color: var(--muted);
+      .ctx-grid__row {
+        display: grid;
+        grid-template-columns: repeat(10, 1fr);
+        gap: 3px;
+      }
+      .ctx-grid__cell {
+        aspect-ratio: 1 / 1;
+        border-radius: 3px;
+        background: var(--border-soft);
+        transition: transform 80ms ease;
+      }
+      .ctx-grid__cell--system_prompt { background: #1f6feb; }
+      .ctx-grid__cell--system_tools  { background: #953800; }
+      .ctx-grid__cell--skills        { background: #b35900; }
+      .ctx-grid__cell--messages      { background: #1aa6e8; }
+      .ctx-grid__cell--free {
+        background: transparent;
+        border: 1px dashed var(--border-soft);
+      }
+      .ctx-grid__cell:hover {
+        transform: scale(1.15);
+      }
+
+      /* Message blocks: per-message tiles, sized by hit count, colored by
+         cache TTL. */
+      .ctx-msgs {
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 12px;
+        box-shadow: var(--shadow);
+      }
+      .ctx-msgs__header {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        margin-bottom: 10px;
+      }
+      .ctx-msgs__title {
+        font-weight: 800;
         font-size: 13px;
       }
-
-      .ctx-item-list {
-        list-style: none;
-        margin: 0;
+      .ctx-msgs__sub {
+        color: var(--muted);
+        font-size: 11.5px;
+      }
+      .ctx-msg-grid {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        align-items: center;
+        min-height: 40px;
+      }
+      .ctx-msg {
+        border-radius: 50%;
+        border: 1px solid rgba(0, 0, 0, 0.2);
         padding: 0;
+        cursor: pointer;
+        background: var(--border-soft);
+        transition: transform 80ms ease, box-shadow 80ms ease;
       }
-      .ctx-item-list .ctx-item + .ctx-item {
-        border-top: 1px solid var(--border-soft);
+      .ctx-msg:hover {
+        transform: scale(1.2);
+        box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.1);
       }
+      .ctx-msg--user      { background: #1f6feb; }
+      .ctx-msg--assistant { background: #1aa6e8; }
+      .ctx-msg--tool_call { background: #21d4c1; }
 
-      .ctx-item__main {
+      /* Cache TTL gradient. Red = expired, amber = close, green = fresh. */
+      .ctx-msg--ttl-expired    { background: #d93025 !important; }
+      .ctx-msg--ttl-soon       { background: #f9ab00 !important; }
+      .ctx-msg--ttl-fresh      { background: #1a7f37 !important; }
+      .ctx-msg--ttl-fresh-long { background: #0f766e !important; }
+
+      /* Per-category list at the bottom. */
+      .ctx-cats {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 12px;
+        box-shadow: var(--shadow);
+      }
+      .ctx-cat__row {
         display: grid;
-        grid-template-columns: minmax(0, 1fr) auto;
+        grid-template-columns: minmax(180px, 1fr) 2fr;
         gap: 12px;
         align-items: center;
-        width: 100%;
-        text-align: left;
-        background: transparent;
-        border: none;
-        cursor: pointer;
-        padding: 8px 14px;
-        font: inherit;
-        color: inherit;
+        padding: 4px 0;
       }
-      .ctx-item__main:disabled {
-        cursor: default;
+      .ctx-cat__left {
+        display: flex;
+        align-items: baseline;
+        gap: 10px;
+        font-size: 13px;
       }
-      .ctx-item__main:not(:disabled):hover {
-        background: #f4f7f6;
+      .ctx-cat__name {
+        font-weight: 700;
+        min-width: 110px;
       }
-      .ctx-item__title {
-        font-size: 13.5px;
-        font-weight: 650;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
+      .ctx-cat__tokens {
+        font-variant-numeric: tabular-nums;
+        color: var(--fg);
       }
-      .ctx-item__subtitle {
-        display: block;
+      .ctx-cat__pct {
         color: var(--muted);
+        font-variant-numeric: tabular-nums;
         font-size: 12px;
-        font-weight: 500;
-        margin-top: 2px;
+      }
+      .ctx-cat__bar {
+        height: 12px;
+        background: var(--border-soft);
+        border-radius: 6px;
         overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
       }
-      .ctx-item__side {
-        display: inline-flex;
-        align-items: center;
-        gap: 6px;
+      .ctx-cat__bar-fill {
+        height: 100%;
+        border-radius: 6px;
       }
-      .ctx-item__arrow {
+      .ctx-cat__bar-fill--system_prompt { background: #1f6feb; }
+      .ctx-cat__bar-fill--system_tools  { background: #953800; }
+      .ctx-cat__bar-fill--skills        { background: #b35900; }
+      .ctx-cat__bar-fill--messages      { background: #1aa6e8; }
+
+      .ctx-empty {
+        padding: 20px;
+        text-align: center;
         color: var(--muted);
-        font-size: 14px;
       }
+
 
       /* Staleness tones for chips and block borders. */
       .chip.tone-fresh { background: #e6ffec; color: var(--success); }
@@ -1029,6 +1070,99 @@
       .ctx-tooltip.visible {
         opacity: 1;
         transform: translateY(0);
+      }
+
+      /* Context block detail modal (clicking a message block in the
+         Context Usage Map opens this). */
+      .ctx-modal {
+        position: fixed;
+        inset: 0;
+        display: none;
+        align-items: center;
+        justify-content: center;
+        z-index: 70;
+        background: rgba(0, 0, 0, 0.35);
+      }
+      .ctx-modal.open { display: flex; }
+      .ctx-modal__panel {
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        box-shadow: 0 20px 60px rgba(0, 0, 0, 0.25);
+        max-width: 720px;
+        width: 90vw;
+        max-height: 80vh;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+      }
+      .ctx-modal__header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 12px 16px;
+        border-bottom: 1px solid var(--border-soft);
+        background: var(--panel-alt);
+      }
+      .ctx-modal__title {
+        margin: 0;
+        font-size: 15px;
+        font-weight: 800;
+      }
+      .ctx-modal__close {
+        border: 1px solid var(--border);
+        background: var(--panel);
+        border-radius: 6px;
+        padding: 4px 10px;
+        cursor: pointer;
+        font-size: 13px;
+        font-weight: 700;
+        color: var(--muted);
+      }
+      .ctx-modal__close:hover { background: var(--border-soft); }
+      .ctx-modal__meta {
+        padding: 8px 16px;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+        font-size: 12px;
+        color: var(--muted);
+        border-bottom: 1px solid var(--border-soft);
+      }
+      .ctx-modal__meta strong { color: var(--fg); font-weight: 700; }
+      .ctx-modal__body {
+        padding: 12px 16px;
+        overflow: auto;
+        font-size: 13px;
+        line-height: 1.5;
+      }
+      .ctx-modal__section {
+        margin-bottom: 14px;
+      }
+      .ctx-modal__section h3 {
+        margin: 0 0 6px;
+        font-size: 12px;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        color: var(--muted);
+      }
+      .ctx-modal pre {
+        background: var(--bg);
+        border: 1px solid var(--border-soft);
+        border-radius: 6px;
+        padding: 8px 10px;
+        font-size: 12px;
+        line-height: 1.45;
+        white-space: pre-wrap;
+        word-break: break-word;
+        margin: 0;
+        max-height: 320px;
+        overflow: auto;
+      }
+      .ctx-modal__empty {
+        color: var(--muted);
+        text-align: center;
+        padding: 24px;
       }
     </style>
   </head>
@@ -1108,6 +1242,21 @@
         </section>
     </main>
 
+    <!-- Context block detail modal (opened by clicking a message block
+         in the Context Usage Map). -->
+    <div class="ctx-modal" id="ctx-modal" aria-hidden="true" role="dialog">
+      <div class="ctx-modal__panel">
+        <div class="ctx-modal__header">
+          <h2 class="ctx-modal__title" id="ctx-modal-title">Block details</h2>
+          <button class="ctx-modal__close" type="button" id="ctx-modal-close">Close</button>
+        </div>
+        <div class="ctx-modal__meta" id="ctx-modal-meta"></div>
+        <div class="ctx-modal__body" id="ctx-modal-body">
+          <div class="ctx-modal__empty">No block selected.</div>
+        </div>
+      </div>
+    </div>
+
     <div class="scrim" id="scrim"></div>
     <aside class="drawer" id="drawer" aria-label="Raw payload">
       <div class="drawer-header">
@@ -1133,6 +1282,7 @@
 
     <div class="ctx-tooltip" id="ctx-tooltip" role="tooltip" aria-hidden="true"></div>
 
+    <script src="tokenizer.js"></script>
     <script src="context.js"></script>
     <script>
 
@@ -1184,6 +1334,11 @@
       const viewContextBtn = $("#view-context");
       const viewTimelineBtn = $("#view-timeline");
       const tooltipEl = $("#ctx-tooltip");
+      const ctxModalEl = $("#ctx-modal");
+      const ctxModalTitleEl = $("#ctx-modal-title");
+      const ctxModalMetaEl = $("#ctx-modal-meta");
+      const ctxModalBodyEl = $("#ctx-modal-body");
+      const ctxModalCloseEl = $("#ctx-modal-close");
       // ---------- Boot ----------
 
       refreshEl.addEventListener("click", () => loadHooks());
@@ -1192,6 +1347,14 @@
       filtersEl.addEventListener("change", onFilterInput);
       $("#filter-clear").addEventListener("click", clearFilters);
       drawerCloseEl.addEventListener("click", closeDrawer);
+      ctxModalCloseEl.addEventListener("click", closeContextModal);
+      ctxModalEl.addEventListener("click", (e) => {
+        // Click on the backdrop (not the panel) closes the modal.
+        if (e.target === ctxModalEl) closeContextModal();
+      });
+      document.addEventListener("keydown", (e) => {
+        if (e.key === "Escape" && ctxModalEl.classList.contains("open")) closeContextModal();
+      });
       scrimEl.addEventListener("click", closeDrawer);
       drawerCopyEl.addEventListener("click", copyDrawerJson);
       drawerSearchEl.addEventListener("input", () => {
@@ -1288,7 +1451,8 @@
         }
 
         // Verifies the per-session view shows the context blocks and the
-        // view toggle is visible.
+        // view toggle is visible. Fire-and-forget: runSelfTests is sync,
+        // the render is async; the test only checks post-render DOM state.
         if (state.selectedSession !== "all" && state.timeline) {
           renderSessionView();
           t(
@@ -1381,7 +1545,7 @@
         if (state.sessionView === mode) return;
         state.sessionView = mode;
         if (state.selectedSession !== "all") {
-          renderSessionView();
+          void renderSessionView();
         }
       }
 
@@ -1440,7 +1604,7 @@
           return;
         }
         ensureTimelineForSelected().then(() => {
-          renderSessionView();
+          void renderSessionView();
         });
       }
 
@@ -1571,7 +1735,7 @@
         }
       }
 
-      function renderSessionView() {
+      async function renderSessionView() {
         const tl = state.timeline;
         if (!tl) {
           contextEl.textContent = "";
@@ -1588,20 +1752,22 @@
         viewTimelineBtn.classList.toggle("active", state.sessionView === "timeline");
 
         if (state.sessionView === "context") {
-          // Context view: logical blocks, no filters, no per-turn render.
+          // Context Usage Map: token grid + per-message blocks + per-category
+          // breakdown. Built from the timeline, the flat hook list, and the
+          // last assistant message's `usage` block. The aggregator is
+          // async (it pulls token counts from the CDN-loaded tokenizer),
+          // so we await it before rendering.
           timelineEl.hidden = true;
           timelineEl.textContent = "";
           filtersEl.hidden = true;
           sessionStatsEl.hidden = true;
           contextEl.hidden = false;
           emptyEl.hidden = true;
-          const blocks = window.Traceframe.context.buildContextBlocks(tl, state.hooks);
-          window.Traceframe.context.renderContextView(blocks.blocks, contextEl, {
-            onItemClick: (item) => {
-              if (item && item.event_id) openDrawer(item.event_id);
-            },
-            onRawClick: (eventIds) => {
-              if (eventIds && eventIds.length) openDrawer(eventIds[0]);
+          const data = await window.Traceframe.context.buildContextUsageMap(tl, state.hooks);
+          window.Traceframe.context.renderContextUsageMap(data, contextEl, {
+            onItemClick: (block) => {
+              if (!block) return;
+              openContextModal(block);
             },
           });
           return;
@@ -2228,7 +2394,7 @@
         if (state.selectedSession === "all") {
           renderAllView(buildSessions(state.hooks));
         } else if (state.timeline) {
-          renderSessionView();
+          void renderSessionView();
         }
       }
 
@@ -2248,7 +2414,7 @@
         if (state.selectedSession === "all") {
           renderAllView(buildSessions(state.hooks));
         } else if (state.timeline) {
-          renderSessionView();
+          void renderSessionView();
         }
       }
 
@@ -2301,6 +2467,82 @@
         drawerSearchEl.value = "";
         drawerEl.classList.remove("open");
         scrimEl.classList.remove("open");
+      }
+
+      // ---------- Context block detail modal ----------
+
+      /** Open the modal for a single message block from the Context Usage
+       *  Map. Shows the kind, tool name (if any), file path / command /
+       *  text content, and the raw payload if we can fetch it. */
+      function openContextModal(block) {
+        if (!block) return;
+        const cx = window.Traceframe.context;
+        const kind = block.kind || "event";
+        const toolName = block.tool_name || "";
+        const titleText = kind + (toolName ? " · " + toolName : "");
+        ctxModalTitleEl.textContent = titleText;
+        ctxModalMetaEl.textContent = "";
+        // Build the body — sections per content type.
+        ctxModalBodyEl.textContent = "";
+        const meta = document.createElement("div");
+        meta.className = "ctx-modal__section";
+        const metaItems = [];
+        if (block.tokens) metaItems.push("<strong>" + cx.formatTokens(block.tokens) + "</strong> tokens");
+        if (block.touched_at) metaItems.push("at " + block.touched_at);
+        if (block.cache && block.cache.hit_count) {
+          metaItems.push("<strong>" + block.cache.hit_count + "</strong> cache hit" + (block.cache.hit_count === 1 ? "" : "s"));
+        }
+        if (block.cache && block.cache.ttl_kind) {
+          metaItems.push("TTL <strong>" + block.cache.ttl_kind + "</strong>");
+        }
+        if (block.cache && block.cache.expires_at) {
+          const rem = Math.max(0, Date.parse(block.cache.expires_at) - Date.now());
+          metaItems.push("expires in " + cx.formatAge(rem));
+        }
+        if (block.event_id) {
+          metaItems.push("event <strong>" + block.event_id + "</strong>");
+        }
+        meta.innerHTML = metaItems.join(" &middot; ");
+        ctxModalMetaEl.appendChild(meta);
+        // Content sections.
+        const sections = [];
+        if (block.text) {
+          sections.push({ h: "Content", pre: block.text });
+        }
+        if (block.subtitle) {
+          sections.push({ h: "Target", pre: block.subtitle });
+        }
+        if (block.input && Object.keys(block.input).length > 0) {
+          sections.push({ h: "Input", pre: JSON.stringify(block.input, null, 2) });
+        }
+        if (block.output) {
+          const out = typeof block.output === "string" ? block.output : JSON.stringify(block.output, null, 2);
+          sections.push({ h: "Output", pre: out });
+        }
+        if (sections.length === 0) {
+          const empty = document.createElement("div");
+          empty.className = "ctx-modal__empty";
+          empty.textContent = "No additional content for this block.";
+          ctxModalBodyEl.appendChild(empty);
+        } else {
+          for (const s of sections) {
+            const sec = document.createElement("div");
+            sec.className = "ctx-modal__section";
+            const h3 = document.createElement("h3");
+            h3.textContent = s.h;
+            const pre = document.createElement("pre");
+            pre.textContent = s.pre;
+            sec.append(h3, pre);
+            ctxModalBodyEl.appendChild(sec);
+          }
+        }
+        ctxModalEl.classList.add("open");
+        ctxModalEl.setAttribute("aria-hidden", "false");
+      }
+
+      function closeContextModal() {
+        ctxModalEl.classList.remove("open");
+        ctxModalEl.setAttribute("aria-hidden", "true");
       }
 
       function renderDrawerBody() {

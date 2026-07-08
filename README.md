@@ -41,19 +41,43 @@ curl http://localhost:4000/healthz
 For the per-session view there are two modes, switched by the toggle in the
 header:
 
-1. **Context view (default)** — the session's `context`, not its chatter. The
-   per-session payload is grouped into logical blocks: `Session` (provider,
-   timing, totals), `Instructions` (first prompt, permission mode, effort),
-   `Tools available` (every tool the agent called, with call counts),
-   `Files (cache)` (deduped Read/Edit/Write targets with last-touched and
-   operation kinds), `Commands` (Bash history with exit status), `Searches`
-   (Grep/Glob), `Skills`, `Turns` (prompt + tool calls + assistant),
-   `Notes` (notifications, permission requests), and `Compacts`. Each item
-   is age-stamped; the colour follows a 3-bucket staleness signal
-   (`fresh` / `warm` / `cold`) tuned per block kind. Hover any item for
-   the full timestamp, age, and a one-line note about what the staleness
-   actually means. The age is a *freshness* signal, not a provider cache
-   TTL — the tooltip calls this out so the meaning is not lost.
+1. **Context Usage Map (default)** — a token grid + per-message block view
+   of everything the agent holds in context. Modeled on Claude Code's
+   `/context` command.
+
+   - **Token grid**: 100 squares, each representing 1% of the model's
+     context window. Color = category (`System prompt`, `System tools`,
+     `Skills`, `Messages`, or free space). Three squares filled means 3%
+     of the window is used.
+   - **Header line**: `model · used / max tokens (pct%)` plus a
+     `cache hits (created)` annotation when the assistant response
+     carried an Anthropic `usage` block.
+   - **Message blocks**: one circle per message, user / assistant /
+     tool call, colored by cache expiration (red = expired, amber = close,
+     green = fresh) and sized by hit count (more hits = bigger). Click
+     any block to open a modal with the full content (text, tool input,
+     tool output, file path) and a `Close` button + ESC handler.
+   - **Per-category list**: a row per category with token count, % of
+     window, and a horizontal bar.
+
+   Token counts come from a CDN-loaded tokenizer (`@anthropic-ai/tokenizer`
+   for Claude, `gpt-tokenizer/encoding/cl100k_base` for OpenAI/Codex),
+   lazy-loaded on first use. If the CDN is unreachable, the count falls
+   back to a `text.length / 4` heuristic so the UI still renders.
+
+   Cache stats come from two sources, in priority order:
+
+   1. The last assistant message's `usage` block (forwarded by the pi
+      extension on `agent_end`, or carried on Claude's assistant
+      events directly). When present, the message blocks get a
+      cache_expiration timestamp derived from
+      `cache_creation.ephemeral_5m_input_tokens` /
+      `ephemeral_1h_input_tokens`, and the hit count from
+      `cache_read_input_tokens`. The tooltip says so explicitly so the
+      number is never confused with a real provider cache.
+   2. A *re-read proxy* when no usage data is present: every additional
+      `Read` on the same file path counts as one cache hit.
+
 2. **Timeline view** — the chronological feed: prompt → tool calls →
    assistant reply, one entry per turn. Filter by kind/tool/failure/duration
    or grep the file path. Click a row to expand input/output, "View raw"

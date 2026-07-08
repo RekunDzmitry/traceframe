@@ -10,8 +10,14 @@
  *   input                -> UserPromptSubmit
  *   tool_execution_start -> PreToolUse
  *   tool_execution_end   -> PostToolUse
- *   agent_end            -> Stop  (with last_assistant_message)
+ *   agent_end            -> Stop  (with last_assistant_message + usage)
  *   session_shutdown     -> SessionEnd
+ *
+ * On SessionStart we forward the system prompt text and the available tool
+ * definitions so the UI can show them as "what the agent was started with"
+ * blocks. On Stop we forward the last assistant message's `usage` (cache
+ * creation / read tokens, input / output tokens) so the UI can show a
+ * token-grid breakdown with real cache TTL.
  *
  * Installation:
  *   Global:   cp traceframe.ts ~/.pi/agent/extensions/
@@ -27,6 +33,33 @@
  */
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+
+/**
+ * Pi's `event` arg is typed as a discriminated union by the ExtensionAPI
+ * generic — but the *individual* handler blocks need to read fields off
+ * `e`, and the union members don't declare those fields. We name them
+ * with local interfaces (one per handler) so the property reads are
+ * type-checked without an unchecked cast.
+ */
+interface SessionStartEvent {
+	reason?: string;
+}
+interface InputEvent {
+	text?: string;
+	source?: string;
+}
+interface ToolStartEvent {
+	toolCallId?: string;
+	toolName?: string;
+	args?: unknown;
+}
+interface ToolEndEvent extends ToolStartEvent {
+	result?: unknown;
+	isError?: boolean;
+}
+interface AgentEndEvent {
+	messages?: ReadonlyArray<unknown>;
+}
 
 const ENDPOINT = (process.env.TRACEFRAME_ENDPOINT || "http://localhost:4000").replace(/\/+$/, "");
 const HOOK_URL = `${ENDPOINT}/api/hooks`;
@@ -124,28 +157,86 @@ function fire(ctx: ExtensionContext, hookEventName: string, event: unknown, extr
 
 // --- Event-specific shaping ------------------------------------------------
 
+/** Coerce Pi's ExtensionContext into the shape we need, safely.
+ *  The context object is a class with public methods, not a plain
+ *  record; reading optional fields through guards keeps the call sites
+ *  honest about what's actually present in a given Pi version. */
+type SystemToolsAccessor = () => Array<{ name?: unknown; description?: unknown }> | undefined;
+
+interface SystemPromptReader {
+	systemPrompt?: unknown;
+	getSystemTools?: SystemToolsAccessor;
+}
+
+function readSystemPrompt(ctx: ExtensionContext): string | undefined {
+	const probe = ctx as unknown as SystemPromptReader;
+	const v = probe.systemPrompt;
+	return typeof v === "string" && v.length > 0 ? v : undefined;
+}
+
+function readSystemTools(ctx: ExtensionContext): Array<{ name: string; description?: string }> {
+	const probe = ctx as unknown as SystemPromptReader;
+	const v = typeof probe.getSystemTools === "function" ? probe.getSystemTools() : undefined;
+	if (!Array.isArray(v)) return [];
+	interface RawToolDef { name?: unknown; description?: unknown }
+	const out: Array<{ name: string; description?: string }> = [];
+	for (const t of v) {
+		if (!t || typeof t !== "object") continue;
+		const raw = t as RawToolDef;
+		const name = raw.name;
+		if (typeof name !== "string" || name.length === 0) continue;
+		const desc = raw.description;
+		out.push({
+			name,
+			description: typeof desc === "string" ? desc : undefined,
+		});
+	}
+	return out;
+}
+
 /** Flatten the content blocks of the last assistant message into a single
  *  string Traceframe can render as the assistant reply in Stop events. */
-function lastAssistantText(messages: Array<{ role: string; content: unknown }> | undefined): string {
+function lastAssistantText(messages: ReadonlyArray<unknown> | undefined): string {
 	if (!messages || messages.length === 0) return "";
 	for (let i = messages.length - 1; i >= 0; i--) {
 		const msg = messages[i];
-		if (msg.role !== "assistant") continue;
+		if (!msg || typeof msg !== "object" || !("role" in msg)) continue;
+		if ((msg as Record<string, unknown>).role !== "assistant") continue;
 		const parts: string[] = [];
-		const content = msg.content;
+		const content = (msg as Record<string, unknown>).content;
 		if (typeof content === "string") {
 			parts.push(content);
 		} else if (Array.isArray(content)) {
 			for (const block of content) {
-				if (block && typeof block === "object" && (block as { type?: string }).type === "text") {
-					const text = (block as { text?: unknown }).text;
-					if (typeof text === "string") parts.push(text);
-				}
+				if (!block || typeof block !== "object") continue;
+				if (!("type" in block)) continue;
+				if ((block as Record<string, unknown>).type !== "text") continue;
+				if (!("text" in block)) continue;
+				const text = (block as Record<string, unknown>).text;
+				if (typeof text === "string") parts.push(text);
 			}
 		}
 		return parts.join("\n");
 	}
 	return "";
+}
+
+/** Pull the Anthropic-style `usage` block off the last assistant message,
+ *  if Pi attached one. Returns undefined when the field is missing or has
+ *  an unrecognized shape — we never invent cache stats we don't have. */
+function lastAssistantUsage(messages: ReadonlyArray<unknown> | undefined): Record<string, unknown> | undefined {
+	if (!messages || messages.length === 0) return undefined;
+	for (let i = messages.length - 1; i >= 0; i--) {
+		const msg = messages[i];
+		if (!msg || typeof msg !== "object" || !("role" in msg)) continue;
+		if ((msg as Record<string, unknown>).role !== "assistant") continue;
+		const usage = (msg as Record<string, unknown>).usage;
+		if (usage && typeof usage === "object") {
+			return usage as Record<string, unknown>;
+		}
+		return undefined;
+	}
+	return undefined;
 }
 
 // --- Extension entry point -------------------------------------------------
@@ -155,12 +246,12 @@ export default function (pi: ExtensionAPI) {
 	// /fork, /clone). The session_id is re-resolved per-event so /fork and
 	// /clone get their own bucket automatically.
 	pi.on("session_start", async (event, ctx) => {
-		fire(
-			ctx,
-			"SessionStart",
-			event as unknown as Record<string, unknown>,
-			{ reason: (event as { reason?: string }).reason },
-		);
+		const e = event as SessionStartEvent;
+		fire(ctx, "SessionStart", event as unknown as Record<string, unknown>, {
+			reason: e.reason,
+			system_prompt: readSystemPrompt(ctx),
+			system_tools: readSystemTools(ctx),
+		});
 	});
 
 	// UserPromptSubmit: capture raw user input that flows through to the
@@ -168,7 +259,7 @@ export default function (pi: ExtensionAPI) {
 	// "continue" behavior). Skip messages injected by other extensions to
 	// avoid logging automated sub-agent prompts as if the user typed them.
 	pi.on("input", async (event, ctx) => {
-		const e = event as { text?: string; source?: string };
+		const e = event as InputEvent;
 		if (e.source === "extension") return; // sent by another extension
 		if (typeof e.text !== "string" || e.text.trim() === "") return;
 		fire(ctx, "UserPromptSubmit", { text: e.text, source: e.source });
@@ -178,7 +269,7 @@ export default function (pi: ExtensionAPI) {
 	// tool_execution_end runs after. We forward both with the same
 	// tool_use_id so Traceframe can pair them into a single timeline row.
 	pi.on("tool_execution_start", async (event, ctx) => {
-		const e = event as { toolCallId?: string; toolName?: string; args?: unknown };
+		const e = event as ToolStartEvent;
 		fire(
 			ctx,
 			"PreToolUse",
@@ -188,13 +279,7 @@ export default function (pi: ExtensionAPI) {
 	});
 
 	pi.on("tool_execution_end", async (event, ctx) => {
-		const e = event as {
-			toolCallId?: string;
-			toolName?: string;
-			args?: unknown;
-			result?: unknown;
-			isError?: boolean;
-		};
+		const e = event as ToolEndEvent;
 		fire(
 			ctx,
 			"PostToolUse",
@@ -209,12 +294,13 @@ export default function (pi: ExtensionAPI) {
 	});
 
 	// Stop: the agent has finished a turn. We forward the final assistant
-	// text so the UI can show it the same way it shows Claude's
-	// last_assistant_message on Stop events.
+	// text plus its `usage` block (if Pi attached one) so the UI can show
+	// both the reply and the cache stats that produced it.
 	pi.on("agent_end", async (event, ctx) => {
-		const e = event as { messages?: Array<{ role: string; content: unknown }> };
+		const e = event as AgentEndEvent;
 		fire(ctx, "Stop", { messageCount: e.messages?.length ?? 0 }, {
 			last_assistant_message: lastAssistantText(e.messages),
+			usage: lastAssistantUsage(e.messages),
 		});
 	});
 
