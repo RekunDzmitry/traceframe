@@ -86,6 +86,70 @@ func TestContextUsageRejectsSymlinkEscape(t *testing.T) {
 	}
 }
 
+func TestContextUsageRejectsRelativeTranscriptRoot(t *testing.T) {
+	// Regression for the second review pass: the previous fix called
+	// `filepath.Abs(rawRoot)` before `filepath.IsAbs`, so a relative
+	// TRACEFRAME_TRANSCRIPT_ROOT (or a default root that collapses to
+	// one when `os.UserHomeDir()` returns "") was silently resolved
+	// against the process CWD and accepted. A symlink that lands inside
+	// the resolved CWD path then grants read access without an explicit
+	// operator override.
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(cwd) })
+
+	// Build a CWD-relative transcript so the test reproduces the exact
+	// pre-fix failure mode: a real file that lives at the path the root
+	// would resolve to if `Abs` ran before `IsAbs`.
+	newCwd := t.TempDir()
+	if err := os.Chdir(newCwd); err != nil {
+		t.Fatal(err)
+	}
+	relTranscriptDir := "sessions"
+	if err := os.Mkdir(relTranscriptDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	relTranscript := filepath.Join(relTranscriptDir, "rollout-relative.jsonl")
+	if err := os.WriteFile(relTranscript, []byte(`{"timestamp":"2026-07-03T10:00:02Z","payload":{"type":"token_count","info":{"last_token_usage":{"total_tokens":42},"model_context_window":1000}}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("TRACEFRAME_TRANSCRIPT_ROOT", relTranscriptDir)
+
+	event := hookEventFromPayload(t, "PreToolUse", "s1", "pre1", "tu-1", time.Date(2026, 7, 3, 10, 0, 1, 0, time.UTC), map[string]any{
+		"tool_name":       "Read",
+		"tool_use_id":     "tu-1",
+		"transcript_path": relTranscript,
+	})
+	summaries := buildSummaries([]*hookEvent{event})
+	if summaries[0].ContextTokens != 0 || summaries[0].ContextWindow != 0 {
+		t.Fatalf("relative transcript root was accepted: %+v", summaries[0])
+	}
+}
+
+
+func TestContextUsageRejectsRelativeTranscriptPath(t *testing.T) {
+	// The same check applies to the requested file path: a hook payload
+	// with a CWD-relative `transcript_path` must not be resolved against
+	// the binary's CWD even if the configured root is absolute.
+	root := t.TempDir()
+	t.Setenv("TRACEFRAME_TRANSCRIPT_ROOT", root)
+	relTranscript := filepath.Join(t.TempDir(), "rollout.jsonl")
+	if err := os.WriteFile(relTranscript, []byte(`{"timestamp":"2026-07-03T10:00:02Z","payload":{"type":"token_count","info":{"last_token_usage":{"total_tokens":42},"model_context_window":1000}}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	event := hookEventFromPayload(t, "PreToolUse", "s1", "pre1", "tu-1", time.Date(2026, 7, 3, 10, 0, 1, 0, time.UTC), map[string]any{
+		"tool_name":       "Read",
+		"tool_use_id":     "tu-1",
+		"transcript_path": relTranscript,
+	})
+	summaries := buildSummaries([]*hookEvent{event})
+	if summaries[0].ContextTokens != 0 || summaries[0].ContextWindow != 0 {
+		t.Fatalf("relative transcript_path was accepted: %+v", summaries[0])
+	}
+}
+
 func TestContextUsageHandlesMalformedAndOversizedLines(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("TRACEFRAME_TRANSCRIPT_ROOT", root)

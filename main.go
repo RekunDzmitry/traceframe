@@ -848,13 +848,14 @@ func readContextSnapshots(rawPath string) []contextSnapshot {
 }
 
 // allowedTranscriptPath validates that rawPath is a `.jsonl` file inside one
-// of the configured transcript roots. Both the root and the path are
-// resolved with `filepath.Abs` + `EvalSymlinks` so symlinked transcripts are
-// compared against their real root. A root that fails to resolve to an
-// absolute path (e.g. when `os.UserHomeDir()` returns "" in a minimal
-// container and no env-var override is set) is treated as untrusted and
-// never grants access — this blocks the CWD-relative symlink escape where
-// an attacker plants `.codex/sessions` in the binary's working directory.
+// of the configured transcript roots. Both the root and the file being
+// requested must be absolute — `filepath.Abs` would otherwise resolve a
+// relative input against the process CWD, reopening the CWD-relative
+// symlink escape where an attacker plants `.codex/sessions` in the
+// binary's working directory (or sets `TRACEFRAME_TRANSCRIPT_ROOT` to a
+// relative path by accident). Both values are also resolved with
+// `EvalSymlinks` so symlinked transcripts are compared against their real
+// root.
 func allowedTranscriptPath(rawPath string) (string, bool) {
 	home, _ := os.UserHomeDir()
 	defaults := []string{
@@ -865,25 +866,28 @@ func allowedTranscriptPath(rawPath string) (string, bool) {
 		firstNonEmpty(strings.TrimSpace(os.Getenv("TRACEFRAME_TRANSCRIPT_ROOT")), defaults[0]),
 		firstNonEmpty(strings.TrimSpace(os.Getenv("TRACEFRAME_CLAUDE_TRANSCRIPT_ROOT")), defaults[1]),
 	}
-	path, err := filepath.Abs(filepath.Clean(rawPath))
-	if err != nil {
-		return "", false
-	}
-	path, err = filepath.EvalSymlinks(path)
-	if err != nil {
-		return "", false
-	}
-	if filepath.Ext(path) != ".jsonl" {
-		return "", false
-	}
 	for _, rawRoot := range roots {
-		abs, rootErr := filepath.Abs(rawRoot)
-		if rootErr != nil || !filepath.IsAbs(abs) {
+		// Reject any root that is not already absolute. `filepath.Abs` would
+		// happily turn `.codex/sessions` into `/cwd/.codex/sessions` and
+		// satisfy the IsAbs check below, so the check has to run on the
+		// raw input first.
+		if !filepath.IsAbs(rawRoot) {
 			continue
 		}
-		root, rootErr := filepath.EvalSymlinks(abs)
+		root, rootErr := filepath.EvalSymlinks(rawRoot)
 		if rootErr != nil {
 			continue
+		}
+		// Reject the requested file path on the same grounds.
+		if !filepath.IsAbs(rawPath) {
+			return "", false
+		}
+		path, err := filepath.EvalSymlinks(rawPath)
+		if err != nil {
+			return "", false
+		}
+		if filepath.Ext(path) != ".jsonl" {
+			return "", false
 		}
 		rel, relErr := filepath.Rel(root, path)
 		if relErr == nil && rel != "." && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
