@@ -107,12 +107,69 @@ type eventSummary struct {
 	Summary        string         `json:"summary"`
 	Status         string         `json:"status,omitempty"`
 	DurationMS     *int64         `json:"duration_ms,omitempty"`
-	Input          map[string]any `json:"input,omitempty"`
-	Output         map[string]any `json:"output,omitempty"`
-	Content        string         `json:"content,omitempty"`
-	PermissionMode string         `json:"permission_mode,omitempty"`
-	Effort         string         `json:"effort,omitempty"`
-	Error          string         `json:"error,omitempty"`
+	Input          map[string]any   `json:"input,omitempty"`
+	Output         map[string]any   `json:"output,omitempty"`
+	Content        string           `json:"content,omitempty"`
+	PermissionMode string           `json:"permission_mode,omitempty"`
+	Effort         string           `json:"effort,omitempty"`
+	Error          string           `json:"error,omitempty"`
+	Model          string           `json:"model,omitempty"`
+	Usage          *eventUsage      `json:"usage,omitempty"`
+}
+
+// eventUsage is the Anthropic API `usage` block we forward verbatim.
+// Carries the per-response cache stats that power the Context Usage Map
+// cache-expiration + hit-count rendering.
+type eventUsage struct {
+	InputTokens                int `json:"input_tokens"`
+	OutputTokens               int `json:"output_tokens"`
+	CacheCreationInputTokens   int `json:"cache_creation_input_tokens,omitempty"`
+	CacheReadInputTokens       int `json:"cache_read_input_tokens,omitempty"`
+	CacheCreation              *struct {
+		Ephemeral5mInputTokens int `json:"ephemeral_5m_input_tokens,omitempty"`
+		Ephemeral1hInputTokens int `json:"ephemeral_1h_input_tokens,omitempty"`
+	} `json:"cache_creation,omitempty"`
+}
+
+func extractUsage(payload map[string]any) *eventUsage {
+	if payload == nil {
+		return nil
+	}
+	u, ok := payload["usage"]
+	if !ok || u == nil {
+		return nil
+	}
+	m, ok := u.(map[string]any)
+	if !ok {
+		return nil
+	}
+	out := &eventUsage{}
+	if v, ok := toInt64(m["input_tokens"]); ok {
+		out.InputTokens = int(v)
+	}
+	if v, ok := toInt64(m["output_tokens"]); ok {
+		out.OutputTokens = int(v)
+	}
+	if v, ok := toInt64(m["cache_creation_input_tokens"]); ok {
+		out.CacheCreationInputTokens = int(v)
+	}
+	if v, ok := toInt64(m["cache_read_input_tokens"]); ok {
+		out.CacheReadInputTokens = int(v)
+	}
+	if cc, ok := m["cache_creation"].(map[string]any); ok {
+		ccOut := &struct {
+			Ephemeral5mInputTokens int `json:"ephemeral_5m_input_tokens,omitempty"`
+			Ephemeral1hInputTokens int `json:"ephemeral_1h_input_tokens,omitempty"`
+		}{}
+		if v, ok := toInt64(cc["ephemeral_5m_input_tokens"]); ok {
+			ccOut.Ephemeral5mInputTokens = int(v)
+		}
+		if v, ok := toInt64(cc["ephemeral_1h_input_tokens"]); ok {
+			ccOut.Ephemeral1hInputTokens = int(v)
+		}
+		out.CacheCreation = ccOut
+	}
+	return out
 }
 
 // sessionSummary aggregates a single session's stats for the header and sidebar.
@@ -698,6 +755,13 @@ func buildNonToolSummary(e *hookEvent) eventSummary {
 	}
 	s.PermissionMode = stringFromPayload(e.Payload, "permission_mode")
 	s.Effort = extractEffort(e.Payload)
+	// Model + usage are top-level fields on the body (the agent's hook
+	// payload sits under e.Payload, but the body itself is the whole
+	// request — so we read these from e.Payload too).
+	if m, ok := e.Payload["model"].(string); ok && m != "" {
+		s.Model = m
+	}
+	s.Usage = extractUsage(e.Payload)
 	switch s.Kind {
 	case kindUserPrompt:
 		s.Content = truncate(stringFromPayload(e.Payload, "prompt"), maxStringBytes)
@@ -815,6 +879,22 @@ func buildToolSummary(pre, post *hookEvent) eventSummary {
 	if pre != nil {
 		s.PermissionMode = stringFromPayload(pre.Payload, "permission_mode")
 		s.Effort = extractEffort(pre.Payload)
+		// Forward model + usage on tool events too, so the Context
+		// Usage Map can pick them up.
+		if m, ok := pre.Payload["model"].(string); ok && m != "" && s.Model == "" {
+			s.Model = m
+		}
+		if s.Usage == nil {
+			s.Usage = extractUsage(pre.Payload)
+		}
+	}
+	if post != nil {
+		if m, ok := post.Payload["model"].(string); ok && m != "" && s.Model == "" {
+			s.Model = m
+		}
+		if s.Usage == nil {
+			s.Usage = extractUsage(post.Payload)
+		}
 	}
 	if post != nil && (s.PermissionMode == "" || s.Effort == "") {
 		if s.PermissionMode == "" {
