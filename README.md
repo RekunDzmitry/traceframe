@@ -81,15 +81,36 @@ header:
 2. **Timeline view** — the chronological feed: prompt → tool calls →
    assistant reply, one entry per turn. Filter by kind/tool/failure/duration
    or grep the file path. Click a row to expand input/output, "View raw"
-   for the full JSON payload.
+   for the full JSON payload. Tool rows show a context-window bar sourced
+   from each hook's `transcript_path`. For Codex the `token_count`
+   snapshots are read directly; for Claude, usage is read from the
+   assistant messages that issued the tool call. Docker Compose mounts
+   both `~/.codex/sessions` and `~/.claude/projects` read-only for this
+   purpose. Set `TRACEFRAME_TRANSCRIPT_ROOT` or
+   `TRACEFRAME_CLAUDE_TRANSCRIPT_ROOT` when the transcripts live elsewhere.
+   Claude usage defaults to a 200,000-token window; Opus 4.8 sessions
+   are derived as 1,000,000 tokens from the transcript model. Override
+   the fallback for other models with `TRACEFRAME_CLAUDE_CONTEXT_WINDOW`
+   when needed.
 
-Underneath both views, rows expose three levels of detail:
+The UI displays hook events grouped by session with three levels of detail:
 
 1. **Compact row** — one-line summary, tool name, status, and duration.
 2. **Expanded details** — tool input/output, Edit diff, Read line range, Bash
    command + stdout/stderr, markdown-rendered prompts and assistant replies,
    permission mode and effort chips.
 3. **Raw JSON drawer** — full original payload, searchable, copy-to-clipboard.
+
+Tool rows show a context-window bar sourced from each hook's
+`transcript_path`. For Codex the `token_count` snapshots are read directly;
+for Claude, usage is read from the assistant messages that issued the tool
+call. Docker Compose mounts both `~/.codex/sessions` and
+`~/.claude/projects` read-only for this purpose. Set
+`TRACEFRAME_TRANSCRIPT_ROOT` or `TRACEFRAME_CLAUDE_TRANSCRIPT_ROOT` when the
+transcripts live elsewhere. Claude usage defaults to a 200,000-token window;
+Opus 4.8 sessions are derived as 1,000,000 tokens from the transcript model.
+Override the fallback for other models with `TRACEFRAME_CLAUDE_CONTEXT_WINDOW`
+when needed.
 
 Pre/Post tool events are paired on the server by `tool_use_id`, collapsing the
 raw event stream into a single timeline entry per tool call. Sessions are
@@ -376,18 +397,19 @@ rather than external commands. Traceframe ships a small extension
 relevant Pi events and posts them to the same `/api/hooks` endpoint used by
 Claude and Codex.
 
-Install for all your Pi sessions:
+Install (project-local — recommended for this repo):
+
+This repo already ships [.pi/settings.json](./.pi/settings.json) that
+auto-loads the extension. Run `pi` from the repo root, answer "yes" to the
+trust prompt (or `/trust` once), and the extension is wired up.
+
+Install (global — applies to every Pi session on this machine):
 
 ```bash
 cp hooks/pi/traceframe.ts ~/.pi/agent/extensions/
 ```
 
-Or per-project (after `/trust`):
-
-```bash
-mkdir -p .pi/extensions
-cp hooks/pi/traceframe.ts .pi/extensions/
-```
+### Configuration
 
 The endpoint defaults to `http://localhost:4000`. Override before starting
 Pi:
@@ -395,6 +417,11 @@ Pi:
 ```bash
 TRACEFRAME_ENDPOINT=http://traceframe.internal:4000 pi
 ```
+
+> **Warning:** tool arguments, working-directory paths, and echoed
+> environment values are sent in the POST body in cleartext. Use
+> `https://` for any host that is not `localhost` or `127.0.0.1`, and never
+> point at a Traceframe deployment you do not trust.
 
 Optional environment variables:
 
@@ -409,10 +436,10 @@ Optional environment variables:
 | Pi event                 | Traceframe `hook_event_name` | Notes |
 |--------------------------|------------------------------|-------|
 | `session_start`          | `SessionStart`               | Startup, `/new`, `/resume`, `/fork`, `/clone`. |
-| `input`                  | `UserPromptSubmit`           | Skips messages injected by other extensions. |
+| `input`                  | `UserPromptSubmit`           | Skips messages injected by other extensions, slash commands, automation, and voice input. |
 | `tool_execution_start`   | `PreToolUse`                 | Includes `tool_name` and `tool_input`. |
 | `tool_execution_end`     | `PostToolUse`                | Pairs with Pre via `tool_use_id`; includes `tool_response`. |
-| `agent_end`              | `Stop`                       | Includes `last_assistant_message`. |
+| `agent_end`              | `Stop`                       | Includes `last_assistant_message`. Tool-only and thinking-only turns render a brief summary instead of an empty string. |
 | `session_shutdown`       | `SessionEnd`                 |                                                              |
 
 ### Session grouping
@@ -422,29 +449,120 @@ Optional environment variables:
 and distinct across forks. `session_name` is the basename of the working
 directory so the UI shows a useful label.
 
+`transcript_path` is the absolute path to the session JSONL file (typically
+under `~/.pi/agent/sessions/`). It is forwarded verbatim to Traceframe so
+context features can read the transcript. For single-user local use this
+is fine; sharing a remote Traceframe deployment multiplies the blast
+radius — use a self-hosted instance behind a trusted network boundary.
+
 ### Safety
 
-The extension never blocks Pi. Every POST is fire-and-forget; a missing or
-slow Traceframe server cannot stall the agent, and a network error is
-silently swallowed (or logged when `TRACEFRAME_DEBUG=1`).
+The extension never blocks Pi. Every POST is fire-and-forget with a 2s
+timeout; a missing or slow Traceframe server cannot stall the agent, and
+a network error is silently swallowed (or logged when `TRACEFRAME_DEBUG=1`).
 
 ### Project-local config (this repo)
 
 The traceframe repo ships its own project-local Pi config at
 [.pi/settings.json](./.pi/settings.json) so `pi` picks up the extension
-and streaming settings automatically when run here. Three things are set:
-
-- **`extensions: ["../hooks/pi/traceframe.ts"]`** — auto-loads the
-  extension. The canonical source is `hooks/pi/traceframe.ts`; the project
-  config just points at it, no copy or symlink required.
-- **`transport: "sse"`** — forces SSE for LLM provider streaming
-  (overrides `auto` so the same transport is used across providers).
-- **`httpIdleTimeoutMs: 600000`** — 10 min, double the 5 min default, to
-  keep long agent runs from being cut off on slow reasoning pauses.
+automatically when run here. Only the extension pointer is set — transport
+and timeout settings are left to your global `~/.pi/agent/settings.json` so
+the per-project config does not silently override your usual choices.
 
 The first time you start `pi` in this directory it will ask whether to
 trust the project. Answer yes (or `/trust` once after startup) and the
 config takes effect on every subsequent run. See [.pi/README.md](./.pi/README.md)
-for the rationale.
+for the rationale and the path-resolution rule for the extension entry.
 
 Reference: https://github.com/earendil-works/pi-coding-agent/blob/main/docs/extensions.md
+
+## Omp Hooks
+
+Omp (Oh My Pi) is a fork of Pi that targets
+`@oh-my-pi/pi-coding-agent` and ships its own extension runtime. Traceframe
+ships a parallel extension
+([hooks/omp/traceframe.ts](./hooks/omp/traceframe.ts)) that posts the same
+events to the same `/api/hooks` endpoint, with `source: "omp"` so the UI
+can tell Omp and Pi events apart.
+
+### Install
+
+Pick one of two layouts. Both reference the same file —
+`hooks/omp/traceframe.ts` is the single source of truth; do not edit one
+copy without updating the other.
+
+**Project-local (preferred in this repo)** — drop a `.omp/settings.json`
+at the repo root that points at the extension:
+
+```json
+{
+  "extensions": ["../hooks/omp/traceframe.ts"]
+}
+```
+
+Trust the project once (`/trust`) and the extension loads on every
+`omp` invocation here.
+
+**Global (every Omp session for the current user)** — copy the extension
+file into your global extensions folder:
+
+```bash
+cp hooks/omp/traceframe.ts ~/.omp/agent/extensions/
+```
+
+### Configure
+
+The endpoint defaults to `http://localhost:4000`. Override before
+starting Omp:
+
+```bash
+TRACEFRAME_ENDPOINT=http://traceframe.internal:4000 omp
+```
+
+> **Warning:** tool arguments, working-directory paths, and echoed
+> environment values travel in the POST body in cleartext. Use
+> `https://` for any host that is not `localhost` or `127.0.0.1`, and
+> never point at a Traceframe deployment you do not trust.
+
+Other environment variables:
+
+| Variable               | Effect                                                         |
+|------------------------|----------------------------------------------------------------|
+| `TRACEFRAME_ENDPOINT`  | Base URL (default `http://localhost:4000`)                     |
+| `TRACEFRAME_DISABLED`  | Set to `1` to disable all posts (useful for debugging Omp)     |
+| `TRACEFRAME_DEBUG`     | Set to `1` to log non-2xx responses and network errors to stderr|
+
+### Event mapping
+
+| Omp event               | Traceframe `hook_event_name` | Notes |
+|-------------------------|------------------------------|-------|
+| `session_start`         | `SessionStart`               | Startup, `/new`, `/resume`, `/fork`, `/clone`. |
+| `input`                 | `UserPromptSubmit`           | Skips messages injected by other extensions, slash commands, automation, and voice input. |
+| `tool_execution_start`  | `PreToolUse`                 | Includes `tool_name` and `tool_input`. |
+| `tool_execution_end`    | `PostToolUse`                | Pairs with Pre via `tool_use_id`; includes `tool_response`. |
+| `agent_end`             | `Stop`                       | Includes `last_assistant_message`. Tool-only and thinking-only turns render a brief summary instead of an empty string. |
+| `session_shutdown`      | `SessionEnd`                 |                                                              |
+
+### Session grouping
+
+`session_id` is the basename of Omp's session file (e.g. `2026-07-03_abc`
+from `/Users/me/.omp/agent/sessions/2026-07-03_abc.jsonl`), stable
+across `/resume` and distinct across `/fork` / `/clone`. `session_name`
+is the basename of the working directory so the UI shows a useful
+label.
+
+`transcript_path` is forwarded verbatim — single-user local is fine;
+sharing a remote Traceframe deployment multiplies the blast radius.
+
+### Safety
+
+The extension never blocks Omp. Every POST is fire-and-forget with a 2s
+`AbortSignal` timeout. A missing or slow Traceframe server cannot stall
+the agent, and a network error is silently swallowed (or logged when
+`TRACEFRAME_DEBUG=1`).
+
+Helper coverage, design notes, and the rationale for inlining the
+helpers into the entry file live in
+[hooks/omp/README.md](./hooks/omp/README.md).
+
+Reference: https://github.com/oh-my-pi/pi-coding-agent/blob/main/docs/extensions.md

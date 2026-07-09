@@ -1398,11 +1398,11 @@
       // Tiny in-page test runner used by the headless browser smoke test.
       // Results are stashed on `window.__traceframeTests` so the headless
       // runner can scrape them via `page.evaluate`; nothing is injected
-      // into the visible DOM. Disable with ?notests=1.
+      // into the visible DOM. Opt in with ?tests=1.
 
       function runSelfTests() {
         const url = new URL(window.location.href);
-        if (url.searchParams.get("notests") === "1") return;
+        if (url.searchParams.get("tests") !== "1") return;
         const results = [];
         const t = (name, cond, detail) => {
           results.push(`${cond ? "PASS" : "FAIL"} ${name}${detail ? " — " + detail : ""}`);

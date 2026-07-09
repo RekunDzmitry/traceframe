@@ -13,18 +13,28 @@ projects.
   traceframe hook extension when you start `pi` here. Single source of
   truth: the extension lives in `hooks/pi/`, the project config points at
   it. No copy, no symlink.
-- **`transport: "sse"`** — forces SSE transport for LLM provider streaming
-  (instead of `auto`, which may pick WebSocket). SSE is the most
-  debuggable and behaves consistently across providers.
-- **`httpIdleTimeoutMs: 600000`** — 10 minutes, double the 5-minute
-  default. Generous enough for long agent runs with many tool calls and
-  slow reasoning, while still surfacing genuinely stuck streams.
+  - Pi resolves this path **relative to the settings file's directory**
+    (not the current working directory), so `../hooks/pi/traceframe.ts`
+    is the same path whether you launch `pi` from the repo root or any
+    subdirectory. Don't change the prefix.
 
 ## What is NOT set here
 
-- `defaultProvider` / `defaultModel` / `defaultThinkingLevel` — these are
-  personal preferences and stay in `~/.pi/agent/settings.json`.
-- API keys — those come from the environment or your global config.
+We intentionally do not pin `transport` or `httpIdleTimeoutMs` so the
+project-local config respects whatever your global `~/.pi/agent/settings.json`
+already chose. The two reasons you might want to override per-project:
+
+- `transport: "sse"` — forces SSE for LLM streaming (overrides the default
+  `auto`). Use this if a provider picks the wrong transport for traceframe.
+- `httpIdleTimeoutMs: 600000` — 10 min, double the 5 min default, to keep
+  long agent runs from being cut off on slow reasoning pauses.
+
+Add either or both to this file if you need them; otherwise leave them out
+so they inherit from your global config.
+
+`defaultProvider` / `defaultModel` / `defaultThinkingLevel` are personal
+preferences and stay in `~/.pi/agent/settings.json`. API keys come from the
+environment or your global config.
 
 ## Trust
 
