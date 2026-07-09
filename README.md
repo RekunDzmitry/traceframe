@@ -38,6 +38,61 @@ curl -X DELETE http://localhost:4000/api/sessions/demo-session
 curl http://localhost:4000/healthz
 ```
 
+For the per-session view there are two modes, switched by the toggle in the
+header:
+
+1. **Context Usage Map (default)** — a token grid + per-message block view
+   of everything the agent holds in context. Modeled on Claude Code's
+   `/context` command.
+
+   - **Token grid**: 100 squares, each representing 1% of the model's
+     context window. Color = category (`System prompt`, `System tools`,
+     `Skills`, `Messages`, or free space). Three squares filled means 3%
+     of the window is used.
+   - **Header line**: `model · used / max tokens (pct%)` plus a
+     `cache hits (created)` annotation when the assistant response
+     carried an Anthropic `usage` block.
+   - **Message blocks**: one circle per message, user / assistant /
+     tool call, colored by cache expiration (red = expired, amber = close,
+     green = fresh) and sized by hit count (more hits = bigger). Click
+     any block to open a modal with the full content (text, tool input,
+     tool output, file path) and a `Close` button + ESC handler.
+   - **Per-category list**: a row per category with token count, % of
+     window, and a horizontal bar.
+
+   Token counts come from a CDN-loaded tokenizer (`@anthropic-ai/tokenizer`
+   for Claude, `gpt-tokenizer/encoding/cl100k_base` for OpenAI/Codex),
+   lazy-loaded on first use. If the CDN is unreachable, the count falls
+   back to a `text.length / 4` heuristic so the UI still renders.
+
+   Cache stats come from two sources, in priority order:
+
+   1. The last assistant message's `usage` block (forwarded by the pi
+      extension on `agent_end`, or carried on Claude's assistant
+      events directly). When present, the message blocks get a
+      cache_expiration timestamp derived from
+      `cache_creation.ephemeral_5m_input_tokens` /
+      `ephemeral_1h_input_tokens`, and the hit count from
+      `cache_read_input_tokens`. The tooltip says so explicitly so the
+      number is never confused with a real provider cache.
+   2. A *re-read proxy* when no usage data is present: every additional
+      `Read` on the same file path counts as one cache hit.
+
+2. **Timeline view** — the chronological feed: prompt → tool calls →
+   assistant reply, one entry per turn. Filter by kind/tool/failure/duration
+   or grep the file path. Click a row to expand input/output, "View raw"
+   for the full JSON payload. Tool rows show a context-window bar sourced
+   from each hook's `transcript_path`. For Codex the `token_count`
+   snapshots are read directly; for Claude, usage is read from the
+   assistant messages that issued the tool call. Docker Compose mounts
+   both `~/.codex/sessions` and `~/.claude/projects` read-only for this
+   purpose. Set `TRACEFRAME_TRANSCRIPT_ROOT` or
+   `TRACEFRAME_CLAUDE_TRANSCRIPT_ROOT` when the transcripts live elsewhere.
+   Claude usage defaults to a 200,000-token window; Opus 4.8 sessions
+   are derived as 1,000,000 tokens from the transcript model. Override
+   the fallback for other models with `TRACEFRAME_CLAUDE_CONTEXT_WINDOW`
+   when needed.
+
 The UI displays hook events grouped by session with three levels of detail:
 
 1. **Compact row** — one-line summary, tool name, status, and duration.

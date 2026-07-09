@@ -23,10 +23,11 @@
         --diff-add-text: #1a7f37;
         --diff-remove: #ffebe9;
         --diff-remove-text: #b35900;
+        --error: #b31d28;
+        --error-bg: #ffebe9;
+        --success: #1a7f37;
+        --warning: #9a6700;
         --warning-bg: #fff8c5;
-        --context-fill-opacity: 0.5;
-        --context-row-padding-top: 29px;
-        --context-meter-height: 18px;
       }
 
       * {
@@ -357,36 +358,6 @@
         cursor: pointer;
         background: var(--panel);
         transition: background 80ms ease;
-        position: relative;
-      }
-      .row.has-context {
-        padding-top: var(--context-row-padding-top);
-      }
-      .context-meter {
-        position: absolute;
-        inset: 0 0 auto;
-        height: var(--context-meter-height);
-        background: #edf3f1;
-        border-bottom: 1px solid #dce8e5;
-        overflow: hidden;
-        pointer-events: none;
-      }
-      .context-meter-fill {
-        position: absolute;
-        inset: 0 auto 0 0;
-        width: var(--context-percent, 0%);
-        background: var(--context-color, #5bb5aa);
-        opacity: var(--context-fill-opacity);
-      }
-      .context-meter-label {
-        position: absolute;
-        inset: 1px 9px auto auto;
-        color: #3f5f5b;
-        font-size: 10px;
-        font-weight: 750;
-        font-variant-numeric: tabular-nums;
-        line-height: 15px;
-        white-space: nowrap;
       }
       .row:hover {
         background: var(--panel-alt);
@@ -853,16 +824,355 @@
           width: 100vw;
         }
       }
+
+      /* ---------- Context blocks view ---------- */
+      .ctx-toolbar {
+        border-bottom: 1px solid var(--border-soft);
+        padding: 10px 18px;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+      .ctx-toolbar .status {
+        flex: 1;
+      }
+      .ctx-toolbar .view-toggle {
+        display: inline-flex;
+        align-items: center;
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        overflow: hidden;
+      }
+      .ctx-toolbar .view-toggle button {
+        border: none;
+        background: var(--panel);
+        color: var(--muted);
+        font-size: 12px;
+        font-weight: 700;
+        padding: 6px 10px;
+        cursor: pointer;
+      }
+      .ctx-toolbar .view-toggle button.active {
+        background: var(--accent);
+        color: white;
+      }
+
+      .ctx-stack {
+        list-style: none;
+        margin: 0;
+        padding: 16px 18px 32px;
+        display: grid;
+        gap: 18px;
+      }
+
+      /* ----- Context Usage Map -------------------------------------- */
+      .ctx-header {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        padding: 4px 4px 0;
+      }
+      .ctx-header__title {
+        margin: 0;
+        font-size: 16px;
+        font-weight: 800;
+        letter-spacing: 0.02em;
+      }
+      .ctx-header__sub {
+        color: var(--muted);
+        font-size: 12.5px;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+      }
+      .ctx-header__model {
+        font-weight: 700;
+        color: var(--fg);
+      }
+      .ctx-header__tokens {
+        font-variant-numeric: tabular-nums;
+      }
+      .ctx-header__cache {
+        color: var(--success);
+        font-variant-numeric: tabular-nums;
+      }
+
+      /* Grid of 100 token-sized squares (10x10). */
+      .ctx-grid {
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 12px;
+        box-shadow: var(--shadow);
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+      }
+      .ctx-grid__row {
+        display: grid;
+        grid-template-columns: repeat(10, 1fr);
+        gap: 3px;
+      }
+      .ctx-grid__cell {
+        aspect-ratio: 1 / 1;
+        border-radius: 3px;
+        background: var(--border-soft);
+        transition: transform 80ms ease;
+      }
+      .ctx-grid__cell--system_prompt { background: #1f6feb; }
+      .ctx-grid__cell--system_tools  { background: #953800; }
+      .ctx-grid__cell--skills        { background: #b35900; }
+      .ctx-grid__cell--messages      { background: #1aa6e8; }
+      .ctx-grid__cell--free {
+        background: transparent;
+        border: 1px dashed var(--border-soft);
+      }
+      .ctx-grid__cell:hover {
+        transform: scale(1.15);
+      }
+
+      /* Message blocks: per-message tiles, sized by hit count, colored by
+         cache TTL. */
+      .ctx-msgs {
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 12px;
+        box-shadow: var(--shadow);
+      }
+      .ctx-msgs__header {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        margin-bottom: 10px;
+      }
+      .ctx-msgs__title {
+        font-weight: 800;
+        font-size: 13px;
+      }
+      .ctx-msgs__sub {
+        color: var(--muted);
+        font-size: 11.5px;
+      }
+      .ctx-msg-grid {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        align-items: center;
+        min-height: 40px;
+      }
+      .ctx-msg {
+        border-radius: 50%;
+        border: 1px solid rgba(0, 0, 0, 0.2);
+        padding: 0;
+        cursor: pointer;
+        background: var(--border-soft);
+        transition: transform 80ms ease, box-shadow 80ms ease;
+      }
+      .ctx-msg:hover {
+        transform: scale(1.2);
+        box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.1);
+      }
+      .ctx-msg--user      { background: #1f6feb; }
+      .ctx-msg--assistant { background: #1aa6e8; }
+      .ctx-msg--tool_call { background: #21d4c1; }
+
+      /* Cache TTL gradient. Red = expired, amber = close, green = fresh. */
+      .ctx-msg--ttl-expired    { background: #d93025 !important; }
+      .ctx-msg--ttl-soon       { background: #f9ab00 !important; }
+      .ctx-msg--ttl-fresh      { background: #1a7f37 !important; }
+      .ctx-msg--ttl-fresh-long { background: #0f766e !important; }
+
+      /* Per-category list at the bottom. */
+      .ctx-cats {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 12px;
+        box-shadow: var(--shadow);
+      }
+      .ctx-cat__row {
+        display: grid;
+        grid-template-columns: minmax(180px, 1fr) 2fr;
+        gap: 12px;
+        align-items: center;
+        padding: 4px 0;
+      }
+      .ctx-cat__left {
+        display: flex;
+        align-items: baseline;
+        gap: 10px;
+        font-size: 13px;
+      }
+      .ctx-cat__name {
+        font-weight: 700;
+        min-width: 110px;
+      }
+      .ctx-cat__tokens {
+        font-variant-numeric: tabular-nums;
+        color: var(--fg);
+      }
+      .ctx-cat__pct {
+        color: var(--muted);
+        font-variant-numeric: tabular-nums;
+        font-size: 12px;
+      }
+      .ctx-cat__bar {
+        height: 12px;
+        background: var(--border-soft);
+        border-radius: 6px;
+        overflow: hidden;
+      }
+      .ctx-cat__bar-fill {
+        height: 100%;
+        border-radius: 6px;
+      }
+      .ctx-cat__bar-fill--system_prompt { background: #1f6feb; }
+      .ctx-cat__bar-fill--system_tools  { background: #953800; }
+      .ctx-cat__bar-fill--skills        { background: #b35900; }
+      .ctx-cat__bar-fill--messages      { background: #1aa6e8; }
+
+      .ctx-empty {
+        padding: 20px;
+        text-align: center;
+        color: var(--muted);
+      }
+
+
+      /* Staleness tones for chips and block borders. */
+      .chip.tone-fresh { background: #e6ffec; color: var(--success); }
+      .chip.tone-warm  { background: var(--warning-bg); color: var(--warning); }
+      .chip.tone-cold  { background: #ffebe9; color: var(--error); }
+
+      /* Custom tooltip for context items. We avoid the title attribute's
+         plain-text default and show a styled panel on hover. */
+      .ctx-tooltip {
+        position: fixed;
+        z-index: 60;
+        max-width: 360px;
+        background: #202124;
+        color: #f3f3f3;
+        border-radius: 8px;
+        padding: 10px 12px;
+        font-size: 12px;
+        line-height: 1.45;
+        white-space: pre-wrap;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25);
+        pointer-events: none;
+        opacity: 0;
+        transform: translateY(4px);
+        transition: opacity 80ms ease, transform 80ms ease;
+      }
+      .ctx-tooltip.visible {
+        opacity: 1;
+        transform: translateY(0);
+      }
+
+      /* Context block detail modal (clicking a message block in the
+         Context Usage Map opens this). */
+      .ctx-modal {
+        position: fixed;
+        inset: 0;
+        display: none;
+        align-items: center;
+        justify-content: center;
+        z-index: 70;
+        background: rgba(0, 0, 0, 0.35);
+      }
+      .ctx-modal.open { display: flex; }
+      .ctx-modal__panel {
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        box-shadow: 0 20px 60px rgba(0, 0, 0, 0.25);
+        max-width: 720px;
+        width: 90vw;
+        max-height: 80vh;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+      }
+      .ctx-modal__header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 12px 16px;
+        border-bottom: 1px solid var(--border-soft);
+        background: var(--panel-alt);
+      }
+      .ctx-modal__title {
+        margin: 0;
+        font-size: 15px;
+        font-weight: 800;
+      }
+      .ctx-modal__close {
+        border: 1px solid var(--border);
+        background: var(--panel);
+        border-radius: 6px;
+        padding: 4px 10px;
+        cursor: pointer;
+        font-size: 13px;
+        font-weight: 700;
+        color: var(--muted);
+      }
+      .ctx-modal__close:hover { background: var(--border-soft); }
+      .ctx-modal__meta {
+        padding: 8px 16px;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+        font-size: 12px;
+        color: var(--muted);
+        border-bottom: 1px solid var(--border-soft);
+      }
+      .ctx-modal__meta strong { color: var(--fg); font-weight: 700; }
+      .ctx-modal__body {
+        padding: 12px 16px;
+        overflow: auto;
+        font-size: 13px;
+        line-height: 1.5;
+      }
+      .ctx-modal__section {
+        margin-bottom: 14px;
+      }
+      .ctx-modal__section h3 {
+        margin: 0 0 6px;
+        font-size: 12px;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        color: var(--muted);
+      }
+      .ctx-modal pre {
+        background: var(--bg);
+        border: 1px solid var(--border-soft);
+        border-radius: 6px;
+        padding: 8px 10px;
+        font-size: 12px;
+        line-height: 1.45;
+        white-space: pre-wrap;
+        word-break: break-word;
+        margin: 0;
+        max-height: 320px;
+        overflow: auto;
+      }
+      .ctx-modal__empty {
+        color: var(--muted);
+        text-align: center;
+        padding: 24px;
+      }
     </style>
   </head>
   <body>
     <main>
       <header class="app-header">
-        <div>
-          <h1>Traceframe Hooks</h1>
+          <h1>Traceframe Context</h1>
           <p class="subtitle">
-            Hook events grouped by session. Click a row to expand, then
-            <em>View raw</em> for the full payload.
+            What the agent holds in context right now — files, tools, skills.
+            Hover any item for the freshness / TTL details.
           </p>
         </div>
         <button class="refresh" type="button" id="refresh">Refresh</button>
@@ -880,6 +1190,10 @@
               <div class="events-title" id="events-title">All sessions</div>
               <div class="events-actions">
                 <div class="status" id="status">Loading hooks...</div>
+                <div class="view-toggle" id="view-toggle" hidden>
+                  <button type="button" id="view-context" class="active">Context</button>
+                  <button type="button" id="view-timeline">Timeline</button>
+                </div>
                 <button class="delete-session" type="button" id="delete-session" hidden>
                   Delete session
                 </button>
@@ -922,11 +1236,26 @@
             </div>
             <button class="filter-clear" type="button" id="filter-clear">Clear filters</button>
           </div>
+          <div class="ctx-stack" id="context-view" hidden></div>
           <ul class="timeline" id="timeline"></ul>
           <div class="empty" id="empty" hidden>No hook events yet.</div>
         </section>
-      </section>
     </main>
+
+    <!-- Context block detail modal (opened by clicking a message block
+         in the Context Usage Map). -->
+    <div class="ctx-modal" id="ctx-modal" aria-hidden="true" role="dialog">
+      <div class="ctx-modal__panel">
+        <div class="ctx-modal__header">
+          <h2 class="ctx-modal__title" id="ctx-modal-title">Block details</h2>
+          <button class="ctx-modal__close" type="button" id="ctx-modal-close">Close</button>
+        </div>
+        <div class="ctx-modal__meta" id="ctx-modal-meta"></div>
+        <div class="ctx-modal__body" id="ctx-modal-body">
+          <div class="ctx-modal__empty">No block selected.</div>
+        </div>
+      </div>
+    </div>
 
     <div class="scrim" id="scrim"></div>
     <aside class="drawer" id="drawer" aria-label="Raw payload">
@@ -951,14 +1280,22 @@
       </div>
     </aside>
 
-    <script>
-      "use strict";
+    <div class="ctx-tooltip" id="ctx-tooltip" role="tooltip" aria-hidden="true"></div>
 
-      // ---------- State ----------
+    <script src="tokenizer.js"></script>
+    <script src="context.js"></script>
+    <script>
 
       const state = {
         hooks: [],
+        // session_id -> array of every hook for that session (ASC by
+        // event_time). Used by the Context Usage Map so it sees the full
+        // session, not just the newest 300 from the global /api/hooks
+        // list (which can drop the SessionStart / system_prompt /
+        // system_tools for long-running sessions).
+        sessionHooks: new Map(),
         selectedSession: "all",
+        sessionView: "context", // "context" | "timeline"
         timeline: null,
         rawPayload: new Map(), // event_id -> payload
         expanded: new Set(), // event_ids currently expanded
@@ -982,6 +1319,7 @@
 
       const sessionsEl = $("#sessions");
       const timelineEl = $("#timeline");
+      const contextEl = $("#context-view");
       const statusEl = $("#status");
       const emptyEl = $("#empty");
       const titleEl = $("#events-title");
@@ -998,7 +1336,15 @@
       const drawerSearchEl = $("#drawer-search");
       const drawerCopyEl = $("#drawer-copy");
       const drawerCloseEl = $("#drawer-close");
-
+      const viewToggleEl = $("#view-toggle");
+      const viewContextBtn = $("#view-context");
+      const viewTimelineBtn = $("#view-timeline");
+      const tooltipEl = $("#ctx-tooltip");
+      const ctxModalEl = $("#ctx-modal");
+      const ctxModalTitleEl = $("#ctx-modal-title");
+      const ctxModalMetaEl = $("#ctx-modal-meta");
+      const ctxModalBodyEl = $("#ctx-modal-body");
+      const ctxModalCloseEl = $("#ctx-modal-close");
       // ---------- Boot ----------
 
       refreshEl.addEventListener("click", () => loadHooks());
@@ -1007,34 +1353,56 @@
       filtersEl.addEventListener("change", onFilterInput);
       $("#filter-clear").addEventListener("click", clearFilters);
       drawerCloseEl.addEventListener("click", closeDrawer);
+      ctxModalCloseEl.addEventListener("click", closeContextModal);
+      ctxModalEl.addEventListener("click", (e) => {
+        // Click on the backdrop (not the panel) closes the modal.
+        if (e.target === ctxModalEl) closeContextModal();
+      });
+      document.addEventListener("keydown", (e) => {
+        if (e.key === "Escape" && ctxModalEl.classList.contains("open")) closeContextModal();
+      });
       scrimEl.addEventListener("click", closeDrawer);
       drawerCopyEl.addEventListener("click", copyDrawerJson);
       drawerSearchEl.addEventListener("input", () => {
         state.searchTerm = drawerSearchEl.value.trim();
         renderDrawerBody();
       });
-      document.addEventListener("keydown", (e) => {
-        if (e.key === "Escape" && state.drawerEventId) {
-          closeDrawer();
-        }
+      // View toggle (Context vs Timeline) is per-session.
+      viewContextBtn.addEventListener("click", () => setSessionView("context"));
+      viewTimelineBtn.addEventListener("click", () => setSessionView("timeline"));
+      // Custom tooltip for context items. We avoid the native title popup
+      // (timing is OS-controlled, styling is locked) and show our own.
+      contextEl.addEventListener("mouseover", (e) => {
+        const t = e.target.closest("[data-tooltip]");
+        if (!t) return;
+        showTooltip(t.dataset.tooltip, e);
+      });
+      contextEl.addEventListener("mousemove", (e) => {
+        if (!tooltipEl.classList.contains("visible")) return;
+        positionTooltip(e);
+      });
+      contextEl.addEventListener("mouseout", (e) => {
+        const t = e.target.closest("[data-tooltip]");
+        if (!t) return;
+        // Only hide if we're really leaving the tooltip'd element.
+        if (e.relatedTarget && t.contains(e.relatedTarget)) return;
+        hideTooltip();
       });
 
+      // ---------- Boot ----------
       loadHooks();
       setInterval(loadHooks, REFRESH_MS);
 
       // ---------- Self-tests ----------
       //
       // Tiny in-page test runner used by the headless browser smoke test.
-      // Assertions are written to <div id="__tests"> so they can be scraped
-      // and asserted on in CI. Enable with ?tests=1.
+      // Results are stashed on `window.__traceframeTests` so the headless
+      // runner can scrape them via `page.evaluate`; nothing is injected
+      // into the visible DOM. Opt in with ?tests=1.
 
       function runSelfTests() {
         const url = new URL(window.location.href);
         if (url.searchParams.get("tests") !== "1") return;
-        const out = document.createElement("div");
-        out.id = "__tests";
-        out.style.cssText = "position:fixed;bottom:0;left:0;background:#fff;color:#000;font:12px monospace;padding:6px;z-index:9999;max-width:100%;white-space:pre;";
-        document.body.appendChild(out);
         const results = [];
         const t = (name, cond, detail) => {
           results.push(`${cond ? "PASS" : "FAIL"} ${name}${detail ? " — " + detail : ""}`);
@@ -1076,9 +1444,39 @@
           state.filters.tool === "Read" && $("#filter-tool").value === "Read",
           `tool=${state.filters.tool}, dropdown=${$("#filter-tool").value}`,
         );
+        // context.js aggregator + staleness semantics.
+        if (window.Traceframe && window.Traceframe.context) {
+          const cx = window.Traceframe.context;
+          for (const r of cx.runTests()) {
+            const ok = r.startsWith("PASS");
+            const name = r.replace(/^(PASS|FAIL) /, "");
+            t("context: " + name, ok, r);
+          }
+        } else {
+          t("context.js loaded", false, "window.Traceframe.context missing");
+        }
 
-        out.textContent = results.join("\n");
-        out.dataset.summary = results.every((r) => r.startsWith("PASS")) ? "ok" : "fail";
+        // Verifies the per-session view shows the context blocks and the
+        // view toggle is visible. Fire-and-forget: runSelfTests is sync,
+        // the render is async; the test only checks post-render DOM state.
+        if (state.selectedSession !== "all" && state.timeline) {
+          renderSessionView();
+          t(
+            "context view is visible for selected session",
+            !contextEl.hidden && timelineEl.hidden,
+            `contextEl.hidden=${contextEl.hidden} timelineEl.hidden=${timelineEl.hidden}`,
+          );
+          t(
+            "view toggle is visible for selected session",
+            !viewToggleEl.hidden,
+            `viewToggleEl.hidden=${viewToggleEl.hidden}`,
+          );
+        }
+
+        window.__traceframeTests = {
+          summary: results.every((r) => r.startsWith("PASS")) ? "ok" : "fail",
+          lines: results,
+        };
       }
 
       // Run after a beat so the initial render and filter wiring have settled.
@@ -1131,15 +1529,54 @@
           statusEl.classList.add("error");
           return null;
         }
+      }async function loadTimeline(sessionId) {
+        try {
+          const response = await fetch(
+            `/api/sessions/${encodeURIComponent(sessionId)}/timeline`,
+          );
+          if (!response.ok) {
+            const body = await response.json().catch(() => ({}));
+            throw new Error(body.detail || body.error || `HTTP ${response.status}`);
+          }
+          return await response.json();
+        } catch (error) {
+          statusEl.textContent = `Failed to load: ${error.message}`;
+          statusEl.classList.add("error");
+          return null;
+        }
+      }
+
+      async function loadSessionHooks(sessionId) {
+        try {
+          const response = await fetch(
+            `/api/sessions/${encodeURIComponent(sessionId)}/hooks`,
+          );
+          if (!response.ok) {
+            const body = await response.json().catch(() => ({}));
+            throw new Error(body.detail || body.error || `HTTP ${response.status}`);
+          }
+          const data = await response.json();
+          return Array.isArray(data.hooks) ? data.hooks : [];
+        } catch (error) {
+          statusEl.textContent = `Failed to load session hooks: ${error.message}`;
+          statusEl.classList.add("error");
+          return [];
+        }
+      }
+
+      async function ensureSessionHooksForSelected() {
+        const id = state.selectedSession;
+        if (!id || id === "all") return;
+        if (!state.sessionHooks.has(id)) {
+          state.sessionHooks.set(id, await loadSessionHooks(id));
+        }
       }
 
       async function loadRawPayload(eventId) {
         if (state.rawPayload.has(eventId)) {
           return state.rawPayload.get(eventId);
         }
-        const response = await fetch(
-          `/api/hooks/${encodeURIComponent(eventId)}`,
-        );
+        const response = await fetch(`/api/hooks/${encodeURIComponent(eventId)}`);
         if (!response.ok) {
           throw new Error(`HTTP ${response.status}`);
         }
@@ -1148,6 +1585,47 @@
         return data;
       }
 
+      // ---------- View mode helpers ----------
+
+      function setSessionView(mode) {
+        if (mode !== "context" && mode !== "timeline") return;
+        if (state.sessionView === mode) return;
+        state.sessionView = mode;
+        if (state.selectedSession !== "all") {
+          void renderSessionView();
+        }
+      }
+
+      function showTooltip(text) {
+        if (!text) {
+          hideTooltip();
+          return;
+        }
+        tooltipEl.textContent = text;
+        tooltipEl.classList.add("visible");
+        tooltipEl.setAttribute("aria-hidden", "false");
+      }
+
+      function positionTooltip(e) {
+        const pad = 14;
+        const w = tooltipEl.offsetWidth || 320;
+        const h = tooltipEl.offsetHeight || 80;
+        const vw = window.innerWidth;
+        const vh = window.innerHeight;
+        let left = e.clientX + pad;
+        let top = e.clientY + pad;
+        if (left + w > vw) left = e.clientX - w - pad;
+        if (top + h > vh) top = e.clientY - h - pad;
+        if (left < 4) left = 4;
+        if (top < 4) top = 4;
+        tooltipEl.style.left = left + "px";
+        tooltipEl.style.top = top + "px";
+      }
+
+      function hideTooltip() {
+        tooltipEl.classList.remove("visible");
+        tooltipEl.setAttribute("aria-hidden", "true");
+      }
       // ---------- Render: sessions sidebar ----------
 
       function render() {
@@ -1173,7 +1651,7 @@
           return;
         }
         ensureTimelineForSelected().then(() => {
-          renderSessionView();
+          void renderSessionView();
         });
       }
 
@@ -1282,6 +1760,10 @@
       function renderAllView(sessions) {
         titleEl.textContent = "All sessions";
         deleteEl.hidden = true;
+        viewToggleEl.hidden = true;
+        contextEl.hidden = true;
+        contextEl.textContent = "";
+        timelineEl.hidden = false;
         sessionStatsEl.hidden = true;
         filtersEl.hidden = state.hooks.length === 0;
         populateToolFilter(state.hooks);
@@ -1300,16 +1782,54 @@
         }
       }
 
-      function renderSessionView() {
+      async function renderSessionView() {
         const tl = state.timeline;
         if (!tl) {
+          contextEl.textContent = "";
           timelineEl.textContent = "";
           emptyEl.hidden = false;
+          emptyEl.textContent = "Loading session...";
           return;
         }
         const session = tl.session || {};
         titleEl.textContent = session.name || "Session";
         deleteEl.hidden = false;
+        viewToggleEl.hidden = false;
+        viewContextBtn.classList.toggle("active", state.sessionView === "context");
+        viewTimelineBtn.classList.toggle("active", state.sessionView === "timeline");
+
+        if (state.sessionView === "context") {
+          // Context Usage Map: token grid + per-message blocks + per-category
+          // breakdown. Built from the timeline and the session-scoped
+          // hook list (not the global /api/hooks, which is capped at 300
+          // newest and can drop the SessionStart / system_prompt for
+          // long-running sessions). The aggregator is async (it pulls
+          // token counts from the CDN-loaded tokenizer), so we await it
+          // before rendering.
+          timelineEl.hidden = true;
+          timelineEl.textContent = "";
+          filtersEl.hidden = true;
+          sessionStatsEl.hidden = true;
+          contextEl.hidden = false;
+          emptyEl.hidden = true;
+          await ensureSessionHooksForSelected();
+          const sessionId = tl.session && tl.session.id;
+          const sessionHooks = sessionId ? (state.sessionHooks.get(sessionId) || []) : [];
+          const data = await window.Traceframe.context.buildContextUsageMap(tl, sessionHooks);
+          window.Traceframe.context.renderContextUsageMap(data, contextEl, {
+            onItemClick: (block) => {
+              if (!block) return;
+              openContextModal(block);
+            },
+          });
+          return;
+        }
+
+        // Timeline view: the original per-turn render. Filters and stats
+        // were designed for this; reusing them keeps parity with the old UX.
+        contextEl.hidden = true;
+        contextEl.textContent = "";
+        timelineEl.hidden = false;
         sessionStatsEl.hidden = false;
         renderSessionStats(session);
         filtersEl.hidden = false;
@@ -1470,28 +1990,6 @@
         row.setAttribute("role", "button");
         row.setAttribute("tabindex", "0");
 
-        // Compute the visible summary once so the row label and the title
-        // text below do not disagree (and so we only call summaryFor once).
-        const summaryText = summaryFor(ev);
-
-        const context = contextFor(ev);
-        if (context) {
-          row.classList.add("has-context");
-          row.style.setProperty("--context-percent", `${context.percent}%`);
-          row.style.setProperty("--context-color", context.color);
-          const meter = document.createElement("span");
-          meter.className = "context-meter";
-          meter.setAttribute("aria-hidden", "true");
-          const fill = document.createElement("span");
-          fill.className = "context-meter-fill";
-          const label = document.createElement("span");
-          label.className = "context-meter-label";
-          label.textContent = `Context ${formatTokenCount(ev.context_tokens)} / ${formatTokenCount(ev.context_window)} · ${Math.round(context.percent)}%`;
-          meter.append(fill, label);
-          row.appendChild(meter);
-          row.setAttribute("aria-label", `${label.textContent}. ${summaryText}`);
-        }
-
         row.addEventListener("click", (e) => {
           if (e.target.closest(".btn")) return;
           toggleExpand(ev.event_id);
@@ -1533,7 +2031,7 @@
           tag.textContent = humanKind(ev.kind);
           title.appendChild(tag);
         }
-
+        const summaryText = summaryFor(ev);
         title.appendChild(document.createTextNode(summaryText));
         main.appendChild(title);
 
@@ -1563,22 +2061,6 @@
 
         row.append(icon, main, side);
         return row;
-      }
-
-      function contextFor(ev) {
-        const used = Number(ev.context_tokens);
-        const total = Number(ev.context_window);
-        if (!Number.isFinite(used) || !Number.isFinite(total) || used <= 0 || total <= 0) return null;
-        const percent = Math.min(100, Math.max(0, (used / total) * 100));
-        const color = percent >= 85 ? "#cf4352" : percent >= 65 ? "#d99b2b" : "#45a69a";
-        return { percent, color };
-      }
-
-      function formatTokenCount(value) {
-        const count = Number(value);
-        if (count >= 1_000_000) return `${(count / 1_000_000).toFixed(1)}m`;
-        if (count >= 1_000) return `${(count / 1_000).toFixed(1)}k`;
-        return String(Math.round(count));
       }
 
       function summaryFor(ev) {
@@ -1964,7 +2446,7 @@
         if (state.selectedSession === "all") {
           renderAllView(buildSessions(state.hooks));
         } else if (state.timeline) {
-          renderSessionView();
+          void renderSessionView();
         }
       }
 
@@ -1984,7 +2466,7 @@
         if (state.selectedSession === "all") {
           renderAllView(buildSessions(state.hooks));
         } else if (state.timeline) {
-          renderSessionView();
+          void renderSessionView();
         }
       }
 
@@ -2037,6 +2519,82 @@
         drawerSearchEl.value = "";
         drawerEl.classList.remove("open");
         scrimEl.classList.remove("open");
+      }
+
+      // ---------- Context block detail modal ----------
+
+      /** Open the modal for a single message block from the Context Usage
+       *  Map. Shows the kind, tool name (if any), file path / command /
+       *  text content, and the raw payload if we can fetch it. */
+      function openContextModal(block) {
+        if (!block) return;
+        const cx = window.Traceframe.context;
+        const kind = block.kind || "event";
+        const toolName = block.tool_name || "";
+        const titleText = kind + (toolName ? " · " + toolName : "");
+        ctxModalTitleEl.textContent = titleText;
+        ctxModalMetaEl.textContent = "";
+        // Build the body — sections per content type.
+        ctxModalBodyEl.textContent = "";
+        const meta = document.createElement("div");
+        meta.className = "ctx-modal__section";
+        const metaItems = [];
+        if (block.tokens) metaItems.push("<strong>" + cx.formatTokens(block.tokens) + "</strong> tokens");
+        if (block.touched_at) metaItems.push("at " + block.touched_at);
+        if (block.cache && block.cache.hit_count) {
+          metaItems.push("<strong>" + block.cache.hit_count + "</strong> cache hit" + (block.cache.hit_count === 1 ? "" : "s"));
+        }
+        if (block.cache && block.cache.ttl_kind) {
+          metaItems.push("TTL <strong>" + block.cache.ttl_kind + "</strong>");
+        }
+        if (block.cache && block.cache.expires_at) {
+          const rem = Math.max(0, Date.parse(block.cache.expires_at) - Date.now());
+          metaItems.push("expires in " + cx.formatAge(rem));
+        }
+        if (block.event_id) {
+          metaItems.push("event <strong>" + block.event_id + "</strong>");
+        }
+        meta.innerHTML = metaItems.join(" &middot; ");
+        ctxModalMetaEl.appendChild(meta);
+        // Content sections.
+        const sections = [];
+        if (block.text) {
+          sections.push({ h: "Content", pre: block.text });
+        }
+        if (block.subtitle) {
+          sections.push({ h: "Target", pre: block.subtitle });
+        }
+        if (block.input && Object.keys(block.input).length > 0) {
+          sections.push({ h: "Input", pre: JSON.stringify(block.input, null, 2) });
+        }
+        if (block.output) {
+          const out = typeof block.output === "string" ? block.output : JSON.stringify(block.output, null, 2);
+          sections.push({ h: "Output", pre: out });
+        }
+        if (sections.length === 0) {
+          const empty = document.createElement("div");
+          empty.className = "ctx-modal__empty";
+          empty.textContent = "No additional content for this block.";
+          ctxModalBodyEl.appendChild(empty);
+        } else {
+          for (const s of sections) {
+            const sec = document.createElement("div");
+            sec.className = "ctx-modal__section";
+            const h3 = document.createElement("h3");
+            h3.textContent = s.h;
+            const pre = document.createElement("pre");
+            pre.textContent = s.pre;
+            sec.append(h3, pre);
+            ctxModalBodyEl.appendChild(sec);
+          }
+        }
+        ctxModalEl.classList.add("open");
+        ctxModalEl.setAttribute("aria-hidden", "false");
+      }
+
+      function closeContextModal() {
+        ctxModalEl.classList.remove("open");
+        ctxModalEl.setAttribute("aria-hidden", "true");
       }
 
       function renderDrawerBody() {

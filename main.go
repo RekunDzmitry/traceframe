@@ -22,10 +22,14 @@ import (
 	"time"
 )
 
-//go:embed static/index.html
+//go:embed static/index.html static/context.js static/tokenizer.js
 var staticFiles embed.FS
 
-var indexHTML []byte
+var (
+	indexHTML   []byte
+	contextJS   []byte
+	tokenizerJS []byte
+)
 
 func init() {
 	var err error
@@ -33,6 +37,11 @@ func init() {
 	if err != nil {
 		panic(err)
 	}
+	contextJS, err = staticFiles.ReadFile("static/context.js")
+	if err != nil {
+		panic(err)
+	}
+	tokenizerJS, err = staticFiles.ReadFile("static/tokenizer.js")
 }
 
 // maxReadBytes caps the size of incoming hook POST bodies.
@@ -104,6 +113,64 @@ type eventSummary struct {
 	Error          string         `json:"error,omitempty"`
 	ContextTokens  int64          `json:"context_tokens,omitempty"`
 	ContextWindow  int64          `json:"context_window,omitempty"`
+	Model          string        `json:"model,omitempty"`
+	Usage          *eventUsage   `json:"usage,omitempty"`
+}
+
+// eventUsage is the Anthropic API `usage` block we forward verbatim.
+// Carries the per-response cache stats that power the Context Usage Map
+// cache-expiration + hit-count rendering.
+type eventUsage struct {
+	InputTokens                int `json:"input_tokens"`
+	OutputTokens               int `json:"output_tokens"`
+	CacheCreationInputTokens   int `json:"cache_creation_input_tokens,omitempty"`
+	CacheReadInputTokens       int `json:"cache_read_input_tokens,omitempty"`
+	CacheCreation              *struct {
+		Ephemeral5mInputTokens int `json:"ephemeral_5m_input_tokens,omitempty"`
+		Ephemeral1hInputTokens int `json:"ephemeral_1h_input_tokens,omitempty"`
+	} `json:"cache_creation,omitempty"`
+}
+
+
+func extractUsage(payload map[string]any) *eventUsage {
+	if payload == nil {
+		return nil
+	}
+	u, ok := payload["usage"]
+	if !ok || u == nil {
+		return nil
+	}
+	m, ok := u.(map[string]any)
+	if !ok {
+		return nil
+	}
+	out := &eventUsage{}
+	if v, ok := toInt64(m["input_tokens"]); ok {
+		out.InputTokens = int(v)
+	}
+	if v, ok := toInt64(m["output_tokens"]); ok {
+		out.OutputTokens = int(v)
+	}
+	if v, ok := toInt64(m["cache_creation_input_tokens"]); ok {
+		out.CacheCreationInputTokens = int(v)
+	}
+	if v, ok := toInt64(m["cache_read_input_tokens"]); ok {
+		out.CacheReadInputTokens = int(v)
+	}
+	if cc, ok := m["cache_creation"].(map[string]any); ok {
+		ccOut := &struct {
+			Ephemeral5mInputTokens int `json:"ephemeral_5m_input_tokens,omitempty"`
+			Ephemeral1hInputTokens int `json:"ephemeral_1h_input_tokens,omitempty"`
+		}{}
+		if v, ok := toInt64(cc["ephemeral_5m_input_tokens"]); ok {
+			ccOut.Ephemeral5mInputTokens = int(v)
+		}
+		if v, ok := toInt64(cc["ephemeral_1h_input_tokens"]); ok {
+			ccOut.Ephemeral1hInputTokens = int(v)
+		}
+		out.CacheCreation = ccOut
+	}
+	return out
 }
 
 type contextSnapshot struct {
@@ -176,6 +243,8 @@ func main() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", s.handleIndex)
 	mux.HandleFunc("/healthz", s.handleHealth)
+	mux.HandleFunc("/context.js", s.handleContextJS)
+	mux.HandleFunc("/tokenizer.js", s.handleTokenizerJS)
 	mux.HandleFunc("/api/hooks", s.handleHooksCollection)
 	mux.HandleFunc("/api/hooks/", s.handleHookByID)
 	mux.HandleFunc("/api/sessions/", s.handleSessionRoute)
@@ -260,6 +329,15 @@ func (s *server) handleSessionRoute(w http.ResponseWriter, r *http.Request) {
 		s.serveSessionTimeline(w, r, sessionID)
 		return
 	}
+	if len(parts) == 2 && parts[1] == "hooks" {
+		if r.Method != http.MethodGet {
+			w.Header().Set("allow", http.MethodGet)
+			writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"error": "method not allowed"})
+			return
+		}
+		s.serveSessionHooks(w, r, sessionID)
+		return
+	}
 
 	if r.Method == http.MethodDelete {
 		s.deleteSession(w, r, sessionID)
@@ -298,6 +376,19 @@ func (s *server) listHooks(w http.ResponseWriter, r *http.Request) {
 	}
 	summaries := buildSummaries(events)
 	writeJSON(w, http.StatusOK, map[string]any{"hooks": summaries})
+}
+
+
+func (s *server) handleContextJS(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("content-type", "application/javascript; charset=utf-8")
+	w.Header().Set("cache-control", "no-cache")
+	_, _ = w.Write(contextJS)
+}
+
+func (s *server) handleTokenizerJS(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("content-type", "application/javascript; charset=utf-8")
+	w.Header().Set("cache-control", "no-cache")
+	_, _ = w.Write(tokenizerJS)
 }
 
 func (s *server) serveHookDetail(w http.ResponseWriter, r *http.Request, eventID string) {
@@ -362,6 +453,31 @@ func (s *server) serveSessionTimeline(w http.ResponseWriter, r *http.Request, se
 	summaries := buildSummaries(events)
 	timeline := buildTimeline(summaries)
 	writeJSON(w, http.StatusOK, timeline)
+}
+// serveSessionHooks returns every hook row for one session in chronological
+// order (oldest first). The Context Usage Map aggregator reads from this
+// instead of the global /api/hooks list (which is capped at 300 newest and
+// can silently omit the SessionStart/system prompt/tool definitions for
+// long-running sessions). The timeline endpoint at
+// /api/sessions/{id}/timeline wraps the same query in a turn-grouped view;
+// this raw form is what the aggregator wants.
+func (s *server) serveSessionHooks(w http.ResponseWriter, r *http.Request, sessionID string) {
+	query := fmt.Sprintf(`
+		SELECT %s
+		FROM claude_hooks
+		WHERE session_id = {session_id:String}
+		ORDER BY event_time ASC
+		LIMIT 5000
+		FORMAT JSONEachRow
+	`, hookRowProjection)
+	params := url.Values{"param_session_id": []string{sessionID}}
+	events, err := s.loadEvents(r.Context(), query, params)
+	if err != nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "query failed", "detail": err.Error()})
+		return
+	}
+	summaries := buildSummaries(events)
+	writeJSON(w, http.StatusOK, map[string]any{"hooks": summaries, "session_id": sessionID})
 }
 
 func (s *server) deleteSession(w http.ResponseWriter, r *http.Request, sessionID string) {
@@ -954,6 +1070,13 @@ func buildNonToolSummary(e *hookEvent) eventSummary {
 	}
 	s.PermissionMode = stringFromPayload(e.Payload, "permission_mode")
 	s.Effort = extractEffort(e.Payload)
+	// Model + usage are top-level fields on the body (the agent's hook
+	// payload sits under e.Payload, but the body itself is the whole
+	// request — so we read these from e.Payload too).
+	if m, ok := e.Payload["model"].(string); ok && m != "" {
+		s.Model = m
+	}
+	s.Usage = extractUsage(e.Payload)
 	switch s.Kind {
 	case kindUserPrompt:
 		s.Content = truncate(stringFromPayload(e.Payload, "prompt"), maxStringBytes)

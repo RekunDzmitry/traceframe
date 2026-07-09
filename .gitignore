@@ -7,3 +7,9 @@ node_modules/
 *.log
 .DS_Store
 .worktrees/
+<<<<<<< HEAD
+traceframe
+tsconfig.json
+node_modules
+=======
+>>>>>>> origin/main
