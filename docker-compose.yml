@@ -23,8 +23,13 @@ services:
     environment:
       PORT: "4000"
       CLICKHOUSE_URL: http://traceframe:traceframe@clickhouse:8123
+      TRACEFRAME_TRANSCRIPT_ROOT: ${HOME}/.codex/sessions
+      TRACEFRAME_CLAUDE_TRANSCRIPT_ROOT: ${HOME}/.claude/projects
     ports:
       - "4000:4000"
+    volumes:
+      - ${HOME}/.codex/sessions:${HOME}/.codex/sessions:ro
+      - ${HOME}/.claude/projects:${HOME}/.claude/projects:ro
     depends_on:
       clickhouse:
         condition: service_healthy

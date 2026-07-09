@@ -18,6 +18,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -101,7 +102,27 @@ type eventSummary struct {
 	PermissionMode string         `json:"permission_mode,omitempty"`
 	Effort         string         `json:"effort,omitempty"`
 	Error          string         `json:"error,omitempty"`
+	ContextTokens  int64          `json:"context_tokens,omitempty"`
+	ContextWindow  int64          `json:"context_window,omitempty"`
 }
+
+type contextSnapshot struct {
+	At         time.Time
+	Tokens     int64
+	Window     int64
+	AfterEvent bool
+}
+
+type cachedContextSnapshots struct {
+	Size      int64
+	Modified  time.Time
+	Snapshots []contextSnapshot
+}
+
+var contextSnapshotCache = struct {
+	sync.RWMutex
+	entries map[string]cachedContextSnapshots
+}{entries: make(map[string]cachedContextSnapshots)}
 
 // sessionSummary aggregates a single session's stats for the header and sidebar.
 type sessionSummary struct {
@@ -480,14 +501,14 @@ func (s *server) backfillNaturalIDs(ctx context.Context) error {
 // --- ClickHouse helpers ---
 
 type hookRow struct {
-	EventTimeMS   string `json:"event_time_ms"`
-	EventID       string `json:"event_id"`
-	EventName     string `json:"event_name"`
-	SessionID     string `json:"session_id"`
-	SessionName   string `json:"session_name"`
-	ToolUseID     string `json:"tool_use_id"`
+	EventTimeMS    string `json:"event_time_ms"`
+	EventID        string `json:"event_id"`
+	EventName      string `json:"event_name"`
+	SessionID      string `json:"session_id"`
+	SessionName    string `json:"session_name"`
+	ToolUseID      string `json:"tool_use_id"`
 	EventNaturalID string `json:"event_natural_id"`
-	Payload       string `json:"payload"`
+	Payload        string `json:"payload"`
 }
 
 func (r hookRow) toHookEvent() (*hookEvent, error) {
@@ -651,7 +672,268 @@ func buildSummaries(events []*hookEvent) []eventSummary {
 			out = append(out, buildNonToolSummary(e))
 		}
 	}
+	attachContextUsage(out, events)
 	return out
+}
+
+// attachContextUsage enriches tool rows with the context-window snapshot from
+// the Codex or Claude transcript referenced by the hook payload.
+func attachContextUsage(summaries []eventSummary, events []*hookEvent) {
+	paths := make(map[string]string)
+	for _, event := range events {
+		if paths[event.SessionID] != "" {
+			continue
+		}
+		paths[event.SessionID] = stringFromPayload(event.Payload, "transcript_path")
+	}
+
+	snapshotsByPath := make(map[string][]contextSnapshot)
+	for i := range summaries {
+		summary := &summaries[i]
+		if summary.Kind != kindTool {
+			continue
+		}
+		rawPath := paths[summary.SessionID]
+		if rawPath == "" {
+			continue
+		}
+		snapshots, ok := snapshotsByPath[rawPath]
+		if !ok {
+			snapshots = readContextSnapshots(rawPath)
+			snapshotsByPath[rawPath] = snapshots
+		}
+		if len(snapshots) == 0 {
+			continue
+		}
+
+		startAt, err := time.Parse(time.RFC3339Nano, summary.EventTime)
+		if err != nil {
+			continue
+		}
+		index := -1
+		if snapshots[0].AfterEvent {
+			endAt, parseErr := time.Parse(time.RFC3339Nano, summary.endTimeOrTime())
+			if parseErr != nil {
+				continue
+			}
+			candidate := sort.Search(len(snapshots), func(j int) bool {
+				return !snapshots[j].At.Before(endAt)
+			})
+			if candidate < len(snapshots) {
+				index = candidate
+			}
+		} else {
+			// Claude records usage on the assistant message that issued the tool,
+			// immediately before the PreToolUse hook.
+			candidate := sort.Search(len(snapshots), func(j int) bool {
+				return snapshots[j].At.After(startAt)
+			})
+			if candidate > 0 {
+				index = candidate - 1
+			}
+		}
+		if index < 0 || index >= len(snapshots) {
+			continue
+		}
+		summary.ContextTokens = snapshots[index].Tokens
+		summary.ContextWindow = snapshots[index].Window
+	}
+}
+
+func readContextSnapshots(rawPath string) []contextSnapshot {
+	path, ok := allowedTranscriptPath(rawPath)
+	if !ok {
+		return nil
+	}
+	info, err := os.Stat(path)
+	if err != nil || !info.Mode().IsRegular() {
+		return nil
+	}
+	contextSnapshotCache.RLock()
+	cached, found := contextSnapshotCache.entries[path]
+	contextSnapshotCache.RUnlock()
+	if found && cached.Size == info.Size() && cached.Modified.Equal(info.ModTime()) {
+		return cached.Snapshots
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		return nil
+	}
+	defer file.Close()
+
+	var snapshots []contextSnapshot
+	scanner := bufio.NewScanner(file)
+	scanner.Buffer(make([]byte, 64<<10), 64<<20)
+	for scanner.Scan() {
+		line := scanner.Bytes()
+		isCodex := bytes.Contains(line, []byte(`"type":"token_count"`))
+		isClaude := bytes.Contains(line, []byte(`"usage":`)) && bytes.Contains(line, []byte(`"role":"assistant"`))
+		if !isCodex && !isClaude {
+			continue
+		}
+		var entry struct {
+			Timestamp string `json:"timestamp"`
+			Payload   struct {
+				Type string `json:"type"`
+				Info struct {
+					LastTokenUsage struct {
+						InputTokens           int64 `json:"input_tokens"`
+						CachedInputTokens     int64 `json:"cached_input_tokens"`
+						OutputTokens          int64 `json:"output_tokens"`
+						ReasoningOutputTokens int64 `json:"reasoning_output_tokens"`
+						TotalTokens           int64 `json:"total_tokens"`
+					} `json:"last_token_usage"`
+					ModelContextWindow int64 `json:"model_context_window"`
+				} `json:"info"`
+			} `json:"payload"`
+			Message struct {
+				Role  string `json:"role"`
+				Model string `json:"model"`
+				Usage struct {
+					InputTokens         int64 `json:"input_tokens"`
+					CacheCreationTokens int64 `json:"cache_creation_input_tokens"`
+					CacheReadTokens     int64 `json:"cache_read_input_tokens"`
+					OutputTokens        int64 `json:"output_tokens"`
+				} `json:"usage"`
+			} `json:"message"`
+		}
+		if err := json.Unmarshal(line, &entry); err != nil {
+			continue
+		}
+		at, err := time.Parse(time.RFC3339Nano, entry.Timestamp)
+		if err != nil {
+			continue
+		}
+		var snapshot contextSnapshot
+		if isCodex && entry.Payload.Type == "token_count" {
+			usage := entry.Payload.Info.LastTokenUsage
+			tokens := usage.TotalTokens
+			if tokens <= 0 {
+				// Fallback when total_tokens is unset; cached_input_tokens is
+				// included so a future Codex revision that omits total_tokens
+				// but populates the cache field is still counted accurately.
+				tokens = usage.InputTokens + usage.CachedInputTokens + usage.OutputTokens + usage.ReasoningOutputTokens
+			}
+			snapshot = contextSnapshot{
+				At:         at,
+				Tokens:     tokens,
+				Window:     entry.Payload.Info.ModelContextWindow,
+				AfterEvent: true,
+			}
+		} else if isClaude && entry.Message.Role == "assistant" {
+			usage := entry.Message.Usage
+			snapshot = contextSnapshot{
+				At:     at,
+				Tokens: usage.InputTokens + usage.CacheCreationTokens + usage.CacheReadTokens,
+				Window: claudeContextWindow(entry.Message.Model),
+			}
+		}
+		if snapshot.Tokens <= 0 || snapshot.Window <= 0 {
+			continue
+		}
+		snapshots = append(snapshots, snapshot)
+	}
+	sort.Slice(snapshots, func(i, j int) bool { return snapshots[i].At.Before(snapshots[j].At) })
+	if scanner.Err() != nil {
+		return nil
+	}
+	contextSnapshotCache.Lock()
+	contextSnapshotCache.entries[path] = cachedContextSnapshots{
+		Size:      info.Size(),
+		Modified:  info.ModTime(),
+		Snapshots: snapshots,
+	}
+	contextSnapshotCache.Unlock()
+	return snapshots
+}
+
+// allowedTranscriptPath validates that rawPath is a `.jsonl` file inside one
+// of the configured transcript roots. Both the root and the file being
+// requested must be absolute — `filepath.Abs` would otherwise resolve a
+// relative input against the process CWD, reopening the CWD-relative
+// symlink escape where an attacker plants `.codex/sessions` in the
+// binary's working directory (or sets `TRACEFRAME_TRANSCRIPT_ROOT` to a
+// relative path by accident). Both values are also resolved with
+// `EvalSymlinks` so symlinked transcripts are compared against their real
+// root.
+func allowedTranscriptPath(rawPath string) (string, bool) {
+	home, _ := os.UserHomeDir()
+	defaults := []string{
+		filepath.Join(home, ".codex", "sessions"),
+		filepath.Join(home, ".claude", "projects"),
+	}
+	roots := []string{
+		firstNonEmpty(strings.TrimSpace(os.Getenv("TRACEFRAME_TRANSCRIPT_ROOT")), defaults[0]),
+		firstNonEmpty(strings.TrimSpace(os.Getenv("TRACEFRAME_CLAUDE_TRANSCRIPT_ROOT")), defaults[1]),
+	}
+	for _, rawRoot := range roots {
+		// Reject any root that is not already absolute. `filepath.Abs` would
+		// happily turn `.codex/sessions` into `/cwd/.codex/sessions` and
+		// satisfy the IsAbs check below, so the check has to run on the
+		// raw input first.
+		if !filepath.IsAbs(rawRoot) {
+			continue
+		}
+		root, rootErr := filepath.EvalSymlinks(rawRoot)
+		if rootErr != nil {
+			continue
+		}
+		// Reject the requested file path on the same grounds.
+		if !filepath.IsAbs(rawPath) {
+			return "", false
+		}
+		path, err := filepath.EvalSymlinks(rawPath)
+		if err != nil {
+			return "", false
+		}
+		if filepath.Ext(path) != ".jsonl" {
+			return "", false
+		}
+		rel, relErr := filepath.Rel(root, path)
+		if relErr == nil && rel != "." && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			return path, true
+		}
+	}
+	return "", false
+}
+
+// claudeContextWindow returns the 1M-token context window for Claude Opus
+// 4.8 and falls back to TRACEFRAME_CLAUDE_CONTEXT_WINDOW (default 200_000)
+// for everything else. The Opus match is anchored so it does not pick up
+// hypothetical siblings like `claude-opus-4-80` or `claude-opus-4-8-preview`.
+func claudeContextWindow(model string) int64 {
+	normalized := strings.ToLower(strings.TrimSpace(model))
+	if isClaudeOpus48(normalized) {
+		return 1_000_000
+	}
+	if configured := strings.TrimSpace(os.Getenv("TRACEFRAME_CLAUDE_CONTEXT_WINDOW")); configured != "" {
+		if value, err := strconv.ParseInt(configured, 10, 64); err == nil && value > 0 {
+			return value
+		}
+	}
+	return 200_000
+}
+
+func isClaudeOpus48(normalized string) bool {
+	const prefix = "claude-opus-4-8"
+	if !strings.HasPrefix(normalized, prefix) {
+		return false
+	}
+	rest := normalized[len(prefix):]
+	if rest == "" {
+		return true
+	}
+	// Accept a date suffix (`claude-opus-4-8-YYYYMMDD`) and reject any
+	// other token continuation like `-preview`, `-80`, or `-next`.
+	if rest[0] != '-' {
+		return false
+	}
+	for _, c := range rest[1:] {
+		if c < '0' || c > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 func toolUseIDOf(e *hookEvent) string {
