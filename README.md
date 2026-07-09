@@ -332,3 +332,91 @@ Create `~/.codex/hooks.json` for user-wide logging, or `.codex/hooks.json` in a 
 Codex will ask you to review and trust non-managed command hooks before they run. Use `/hooks` in Codex to inspect loaded hooks.
 
 Reference: https://developers.openai.com/codex/hooks
+
+## Pi Agent Hooks
+
+Pi is an in-process coding agent whose lifecycle hooks are exposed as
+[TypeScript extensions](https://github.com/earendil-works/pi-coding-agent)
+rather than external commands. Traceframe ships a small extension
+([hooks/pi/traceframe.ts](./hooks/pi/traceframe.ts)) that subscribes to the
+relevant Pi events and posts them to the same `/api/hooks` endpoint used by
+Claude and Codex.
+
+Install (project-local — recommended for this repo):
+
+This repo already ships [.pi/settings.json](./.pi/settings.json) that
+auto-loads the extension. Run `pi` from the repo root, answer "yes" to the
+trust prompt (or `/trust` once), and the extension is wired up.
+
+Install (global — applies to every Pi session on this machine):
+
+```bash
+cp hooks/pi/traceframe.ts ~/.pi/agent/extensions/
+```
+
+### Configuration
+
+The endpoint defaults to `http://localhost:4000`. Override before starting
+Pi:
+
+```bash
+TRACEFRAME_ENDPOINT=http://traceframe.internal:4000 pi
+```
+
+> **Warning:** tool arguments, working-directory paths, and echoed
+> environment values are sent in the POST body in cleartext. Use
+> `https://` for any host that is not `localhost` or `127.0.0.1`, and never
+> point at a Traceframe deployment you do not trust.
+
+Optional environment variables:
+
+| Variable               | Effect                                                     |
+|------------------------|------------------------------------------------------------|
+| `TRACEFRAME_ENDPOINT`  | Base URL (default `http://localhost:4000`)                 |
+| `TRACEFRAME_DISABLED`  | `1` to no-op the extension                                 |
+| `TRACEFRAME_DEBUG`     | `1` to log failed posts to stderr                          |
+
+### Event mapping
+
+| Pi event                 | Traceframe `hook_event_name` | Notes |
+|--------------------------|------------------------------|-------|
+| `session_start`          | `SessionStart`               | Startup, `/new`, `/resume`, `/fork`, `/clone`. |
+| `input`                  | `UserPromptSubmit`           | Skips messages injected by other extensions, slash commands, automation, and voice input. |
+| `tool_execution_start`   | `PreToolUse`                 | Includes `tool_name` and `tool_input`. |
+| `tool_execution_end`     | `PostToolUse`                | Pairs with Pre via `tool_use_id`; includes `tool_response`. |
+| `agent_end`              | `Stop`                       | Includes `last_assistant_message`. Tool-only and thinking-only turns render a brief summary instead of an empty string. |
+| `session_shutdown`       | `SessionEnd`                 |                                                              |
+
+### Session grouping
+
+`session_id` is the basename of Pi's session file (e.g. `2026-07-03_abc` from
+`/Users/me/.pi/agent/sessions/2026-07-03_abc.jsonl`), stable across resumes
+and distinct across forks. `session_name` is the basename of the working
+directory so the UI shows a useful label.
+
+`transcript_path` is the absolute path to the session JSONL file (typically
+under `~/.pi/agent/sessions/`). It is forwarded verbatim to Traceframe so
+context features can read the transcript. For single-user local use this
+is fine; sharing a remote Traceframe deployment multiplies the blast
+radius — use a self-hosted instance behind a trusted network boundary.
+
+### Safety
+
+The extension never blocks Pi. Every POST is fire-and-forget with a 2s
+timeout; a missing or slow Traceframe server cannot stall the agent, and
+a network error is silently swallowed (or logged when `TRACEFRAME_DEBUG=1`).
+
+### Project-local config (this repo)
+
+The traceframe repo ships its own project-local Pi config at
+[.pi/settings.json](./.pi/settings.json) so `pi` picks up the extension
+automatically when run here. Only the extension pointer is set — transport
+and timeout settings are left to your global `~/.pi/agent/settings.json` so
+the per-project config does not silently override your usual choices.
+
+The first time you start `pi` in this directory it will ask whether to
+trust the project. Answer yes (or `/trust` once after startup) and the
+config takes effect on every subsequent run. See [.pi/README.md](./.pi/README.md)
+for the rationale and the path-resolution rule for the extension entry.
+
+Reference: https://github.com/earendil-works/pi-coding-agent/blob/main/docs/extensions.md
