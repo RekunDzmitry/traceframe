@@ -420,3 +420,94 @@ config takes effect on every subsequent run. See [.pi/README.md](./.pi/README.md
 for the rationale and the path-resolution rule for the extension entry.
 
 Reference: https://github.com/earendil-works/pi-coding-agent/blob/main/docs/extensions.md
+
+## Omp Hooks
+
+Omp (Oh My Pi) is a fork of Pi that targets
+`@oh-my-pi/pi-coding-agent` and ships its own extension runtime. Traceframe
+ships a parallel extension
+([hooks/omp/traceframe.ts](./hooks/omp/traceframe.ts)) that posts the same
+events to the same `/api/hooks` endpoint, with `source: "omp"` so the UI
+can tell Omp and Pi events apart.
+
+### Install
+
+Pick one of two layouts. Both reference the same file —
+`hooks/omp/traceframe.ts` is the single source of truth; do not edit one
+copy without updating the other.
+
+**Project-local (preferred in this repo)** — drop a `.omp/settings.json`
+at the repo root that points at the extension:
+
+```json
+{
+  "extensions": ["../hooks/omp/traceframe.ts"]
+}
+```
+
+Trust the project once (`/trust`) and the extension loads on every
+`omp` invocation here.
+
+**Global (every Omp session for the current user)** — copy the extension
+file into your global extensions folder:
+
+```bash
+cp hooks/omp/traceframe.ts ~/.omp/agent/extensions/
+```
+
+### Configure
+
+The endpoint defaults to `http://localhost:4000`. Override before
+starting Omp:
+
+```bash
+TRACEFRAME_ENDPOINT=http://traceframe.internal:4000 omp
+```
+
+> **Warning:** tool arguments, working-directory paths, and echoed
+> environment values travel in the POST body in cleartext. Use
+> `https://` for any host that is not `localhost` or `127.0.0.1`, and
+> never point at a Traceframe deployment you do not trust.
+
+Other environment variables:
+
+| Variable               | Effect                                                         |
+|------------------------|----------------------------------------------------------------|
+| `TRACEFRAME_ENDPOINT`  | Base URL (default `http://localhost:4000`)                     |
+| `TRACEFRAME_DISABLED`  | Set to `1` to disable all posts (useful for debugging Omp)     |
+| `TRACEFRAME_DEBUG`     | Set to `1` to log non-2xx responses and network errors to stderr|
+
+### Event mapping
+
+| Omp event               | Traceframe `hook_event_name` | Notes |
+|-------------------------|------------------------------|-------|
+| `session_start`         | `SessionStart`               | Startup, `/new`, `/resume`, `/fork`, `/clone`. |
+| `input`                 | `UserPromptSubmit`           | Skips messages injected by other extensions, slash commands, automation, and voice input. |
+| `tool_execution_start`  | `PreToolUse`                 | Includes `tool_name` and `tool_input`. |
+| `tool_execution_end`    | `PostToolUse`                | Pairs with Pre via `tool_use_id`; includes `tool_response`. |
+| `agent_end`             | `Stop`                       | Includes `last_assistant_message`. Tool-only and thinking-only turns render a brief summary instead of an empty string. |
+| `session_shutdown`      | `SessionEnd`                 |                                                              |
+
+### Session grouping
+
+`session_id` is the basename of Omp's session file (e.g. `2026-07-03_abc`
+from `/Users/me/.omp/agent/sessions/2026-07-03_abc.jsonl`), stable
+across `/resume` and distinct across `/fork` / `/clone`. `session_name`
+is the basename of the working directory so the UI shows a useful
+label.
+
+`transcript_path` is forwarded verbatim — single-user local is fine;
+sharing a remote Traceframe deployment multiplies the blast radius.
+
+### Safety
+
+The extension never blocks Omp. Every POST is fire-and-forget with a 2s
+`AbortSignal` timeout. A missing or slow Traceframe server cannot stall
+the agent, and a network error is silently swallowed (or logged when
+`TRACEFRAME_DEBUG=1`).
+
+Helper coverage, design notes, and the rationale for inlining the
+helpers into the entry file live in
+[hooks/omp/README.md](./hooks/omp/README.md).
+
+Reference: https://github.com/oh-my-pi/pi-coding-agent/blob/main/docs/extensions.md
