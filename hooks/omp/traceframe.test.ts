@@ -1,10 +1,15 @@
 /**
- * Unit tests for the pure helpers in `traceframe-helpers.ts`.
+ * Unit tests for the pure helpers inlined into `traceframe.ts`.
  *
- * Run with: `bun test hooks/omp/traceframe-helpers.test.ts`
- *   or:    `node --test --import tsx/esm hooks/omp/traceframe-helpers.test.ts`
+ * Run with: `bun test hooks/omp/traceframe.test.ts`
+ *   or:    `node --test --import tsx/esm hooks/omp/traceframe.test.ts`
  * (the file is plain TypeScript with no test-time deps; pick whichever
  *  runtime is in your toolchain).
+ *
+ * The helpers live inside `traceframe.ts` so the documented single-file
+ * install (`cp hooks/omp/traceframe.ts ~/.omp/agent/extensions/`) keeps
+ * working. The helper tests import the named exports from the entry
+ * module rather than re-implementing the logic.
  */
 
 import { describe, it } from "node:test";
@@ -22,7 +27,7 @@ import {
 	sessionIDFromFile,
 	sessionNameFromCwd,
 	type AssistantMessage,
-} from "./traceframe-helpers";
+} from "./traceframe";
 
 describe("isRecord", () => {
 	it("accepts plain objects", () => {

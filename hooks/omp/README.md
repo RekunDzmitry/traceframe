@@ -95,21 +95,34 @@ full 5-minute undici default.
 ## Testing
 
 Pure helpers (boundary parsers, session-name resolution, content-block
-flattening) are unit-tested with `bun test`:
+flattening) are inlined into `traceframe.ts` and unit-tested with
+`bun test`:
 
 ```bash
-bun test hooks/omp/traceframe-helpers.test.ts
+bun test hooks/omp/traceframe.test.ts
 ```
 
-The test file imports only `traceframe-helpers.ts` (no `fetch`, no Omp
-extension API), so the suite runs without installing
-`@oh-my-pi/pi-coding-agent`.
+The test file imports only the named helper exports from
+`traceframe.ts`. It uses `node:test` + `node:assert/strict`; pick
+whichever runtime is in your toolchain (`bun test`, or
+`node --test --import tsx/esm`).
+
+> The helpers are deliberately inlined into `traceframe.ts` (and the
+> file ships as a single self-contained source) so the documented
+> `cp` install (`cp hooks/omp/traceframe.ts ~/.omp/agent/extensions/`)
+> keeps working without a sibling `package.json` or a second copied
+> file. The companion Pi extension still ships helpers in a separate
+> file — see the next section.
 
 ## How it differs from the Pi extension
 
 `hooks/pi/traceframe.ts` covers the upstream
 `@earendil-works/pi-coding-agent`. Same event mapping, same payload
 shape, `source: "pi"` instead of `"omp"`, `sessionName` falls back to
-`"Pi session"` instead of `"Omp session"`. The two folders share the
-same design (entry point + helpers + helpers tests) so any future fix
-lands in both.
+`"Pi session"` instead of `"Omp session"`, and the Pi side keeps its
+helpers in a sibling `traceframe-helpers.ts` file. The Omp side
+inlines the helpers because Omp's documented install paths copy a
+single `.ts`; the Pi side can split because Pi resolves the
+extensions tree relative to the loaded file. Test coverage shapes
+differ accordingly — both folders ship a `*.test.ts` that exercises
+the same boundary parsers.

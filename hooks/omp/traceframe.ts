@@ -13,10 +13,25 @@
  *   agent_end            -> Stop  (with last_assistant_message)
  *   session_shutdown     -> SessionEnd
  *
+ * Self-contained install:
+ *   The file is intentionally a SINGLE source file. The documented install
+ *   copies only this `.ts` into `~/.omp/agent/extensions/` or
+ *   `.omp/extensions/`, so we deliberately do NOT import any sibling file
+ *   (no package.json ships next to it; the loader would fail to resolve a
+ *   `./traceframe-helpers` import). All helpers live below and are also
+ *   exported as named exports so the helper unit tests can import them
+ *   without re-implementing the logic.
+ *
  * Install (project-local — preferred):
- *   This repo can ship a project-local config in `.omp/settings.json` that
- *   points at `../hooks/omp/traceframe.ts`. Trust the project once with
- *   `/trust` and the extension loads on every `omp` invocation here.
+ *   Drop a `.omp/settings.json` at the repo root that points at the
+ *   extension:
+ *
+ *     {
+ *       "extensions": ["../hooks/omp/traceframe.ts"]
+ *     }
+ *
+ *   Trust the project once (`/trust`) and the extension loads on every
+ *   `omp` invocation here.
  *
  * Install (global — all your Omp sessions):
  *   cp hooks/omp/traceframe.ts ~/.omp/agent/extensions/
@@ -39,31 +54,201 @@
 
 import type { ExtensionAPI, ExtensionContext } from "@oh-my-pi/pi-coding-agent";
 
-import {
-	isNonUserSource,
-	isRecord,
-	lastAssistantText,
-	parseAgentEnd,
-	parseInput,
-	parseSessionStart,
-	parseToolEvent,
-	sessionIDFromFile,
-	sessionNameFromCwd,
-	type UnknownRecord,
-} from "./traceframe-helpers";
+// --- Config ----------------------------------------------------------------
 
 const ENDPOINT = (process.env.TRACEFRAME_ENDPOINT || "http://localhost:4000").replace(/\/+$/, "");
 const HOOK_URL = `${ENDPOINT}/api/hooks`;
 const DISABLED = process.env.TRACEFRAME_DISABLED === "1";
 const DEBUG = process.env.TRACEFRAME_DEBUG === "1";
 
-function asString(value: unknown): string | undefined {
-	return typeof value === "string" ? value : undefined;
+// --- Pure helpers (also re-exported at the bottom for tests) --------------
+
+export type UnknownRecord = Record<string, unknown>;
+
+export interface AssistantMessage {
+	role: string;
+	content: unknown;
 }
 
-function asBoolean(value: unknown): boolean | undefined {
-	return typeof value === "boolean" ? value : undefined;
+export interface SessionStartEvent {
+	reason?: string;
 }
+
+export interface ToolEvent {
+	toolCallId?: unknown;
+	toolName?: unknown;
+	args?: unknown;
+	result?: unknown;
+	isError?: unknown;
+}
+
+// --- Type guards -----------------------------------------------------------
+
+export function isRecord(value: unknown): value is UnknownRecord {
+	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+export function isString(value: unknown): value is string {
+	return typeof value === "string";
+}
+
+export function isBoolean(value: unknown): value is boolean {
+	return typeof value === "boolean";
+}
+
+export function asString(value: unknown): string | undefined {
+	return isString(value) ? value : undefined;
+}
+
+export function asBoolean(value: unknown): boolean | undefined {
+	return isBoolean(value) ? value : undefined;
+}
+
+function asArray<T>(value: unknown, guard: (item: unknown) => item is T): T[] | undefined {
+	return Array.isArray(value) ? value.filter(guard) : undefined;
+}
+
+function isAssistantMessage(value: unknown): value is AssistantMessage {
+	return isRecord(value) && typeof value.role === "string";
+}
+
+// --- Boundary parsers ------------------------------------------------------
+
+export function parseSessionStart(event: unknown): SessionStartEvent | undefined {
+	if (!isRecord(event)) return undefined;
+	return { reason: asString(event.reason) };
+}
+
+/**
+ * Returns the trimmed text and source if the input event is well-formed and
+ * non-empty. Returns undefined for missing text, empty text, or any non-object
+ * payload — the caller drops the event in that case.
+ */
+export function parseInput(event: unknown): { text: string; source: string | undefined } | undefined {
+	if (!isRecord(event)) return undefined;
+	const text = asString(event.text);
+	if (text === undefined || text.trim() === "") return undefined;
+	const source = asString(event.source);
+	return { text, source };
+}
+
+export function parseToolEvent(event: unknown): ToolEvent | undefined {
+	if (!isRecord(event)) return undefined;
+	return {
+		toolCallId: event.toolCallId,
+		toolName: event.toolName,
+		args: event.args,
+		result: event.result,
+		isError: event.isError,
+	};
+}
+
+/**
+ * Returns the assistant message list if the payload is an object. Always
+ * returns an array (possibly empty) so the caller never needs to special-case
+ * missing `messages`.
+ */
+export function parseAgentEnd(event: unknown): { messages: AssistantMessage[] } | undefined {
+	if (!isRecord(event)) return undefined;
+	const messages = asArray(event.messages, isAssistantMessage);
+	return { messages: messages ?? [] };
+}
+
+// --- Session state helpers -------------------------------------------------
+
+/**
+ * Stable session id derived from the live session file. Tracks forks, /resume,
+ * and /clone because the session manager rebinds the file for each.
+ */
+export function sessionIDFromFile(file: string | undefined): string {
+	if (!file) return "ephemeral";
+	// Basename without extension: ".../2026-07-03_abc.jsonl" -> "2026-07-03_abc".
+	// Matches the granularity the UI expects (one per real session, not per
+	// resume of the same session).
+	const base = file.split("/").pop() ?? file;
+	return base.replace(/\.[^.]+$/, "");
+}
+
+/**
+ * Human label derived from the working directory's last segment.
+ */
+export function sessionNameFromCwd(cwd: string | undefined): string {
+	if (cwd) {
+		const segments = cwd.split("/").filter(Boolean);
+		const last = segments[segments.length - 1];
+		if (last) return last;
+	}
+	return "Omp session";
+}
+
+/**
+ * Sources that did NOT originate from a real user keystroke. The input
+ * handler skips events tagged with any of these so the timeline only shows
+ * what the user actually said to the agent.
+ */
+export const NON_USER_SOURCES: Record<string, true> = {
+	extension: true,
+	slash: true,
+	command: true,
+	automation: true,
+	voice: true,
+};
+
+export function isNonUserSource(source: string | undefined): boolean {
+	return source !== undefined && NON_USER_SOURCES[source] === true;
+}
+
+// --- Event-specific shaping ------------------------------------------------
+
+/**
+ * Flatten the content blocks of the last assistant message into a single
+ * string Traceframe can render as the assistant reply in Stop events.
+ *
+ * - Plain string content is returned verbatim.
+ * - Array content is reduced to a single string: text blocks are concatenated;
+ *   tool_use / thinking blocks are summarised so a tool-only assistant turn
+ *   does not produce an empty `last_assistant_message`.
+ * - Any other shape (null, number, etc.) yields "".
+ */
+export function lastAssistantText(messages: AssistantMessage[] | undefined): string {
+	if (!messages || messages.length === 0) return "";
+	for (let i = messages.length - 1; i >= 0; i--) {
+		const msg = messages[i];
+		if (msg.role !== "assistant") continue;
+		const content = msg.content;
+		if (isString(content)) return content;
+		if (!Array.isArray(content)) return "";
+		const parts: string[] = [];
+		let toolUseCount = 0;
+		let thinkingCount = 0;
+		for (const block of content) {
+			if (!isRecord(block)) continue;
+			const type = block.type;
+			if (type === "text") {
+				const text = block.text;
+				if (isString(text) && text.length > 0) parts.push(text);
+			} else if (type === "tool_use") {
+				toolUseCount += 1;
+			} else if (type === "thinking") {
+				thinkingCount += 1;
+			}
+		}
+		if (parts.length > 0) return parts.join("\n");
+		if (toolUseCount > 0 && thinkingCount > 0) {
+			return `[called ${toolUseCount} tool${toolUseCount === 1 ? "" : "s"}, ${thinkingCount} thinking block${thinkingCount === 1 ? "" : "s"}]`;
+		}
+		if (toolUseCount > 0) {
+			return `[called ${toolUseCount} tool${toolUseCount === 1 ? "" : "s"}]`;
+		}
+		if (thinkingCount > 0) {
+			return `[${thinkingCount} thinking block${thinkingCount === 1 ? "" : "s"}]`;
+		}
+		return "";
+	}
+	return "";
+}
+
+// --- Context-bound session helpers ----------------------------------------
 
 function sessionID(ctx: ExtensionContext): string {
 	return sessionIDFromFile(ctx.sessionManager.getSessionFile());
