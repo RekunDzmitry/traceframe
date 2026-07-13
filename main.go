@@ -117,15 +117,27 @@ type eventSummary struct {
 	Usage          *eventUsage   `json:"usage,omitempty"`
 }
 
-// eventUsage is the Anthropic API `usage` block we forward verbatim.
-// Carries the per-response cache stats that power the Context Usage Map
-// cache-expiration + hit-count rendering.
+// eventUsage is the per-response usage block we forward to the UI. It
+// holds the Anthropic shape (input_tokens / output_tokens / cache_*_input
+// _tokens) plus normalized fields from Pi (cacheRead / cacheWrite) and the
+// MiniMax / OpenAI-compatible shape (prompt_tokens / completion_tokens /
+// prompt_tokens_details.cached_tokens). extractUsage populates whichever
+// fields it sees; the renderer (static/context.js) reads them in priority
+// order: cacheRead → cached_tokens → cache_read_input_tokens.
 type eventUsage struct {
-	InputTokens                int `json:"input_tokens"`
-	OutputTokens               int `json:"output_tokens"`
-	CacheCreationInputTokens   int `json:"cache_creation_input_tokens,omitempty"`
-	CacheReadInputTokens       int `json:"cache_read_input_tokens,omitempty"`
-	CacheCreation              *struct {
+	InputTokens              int `json:"input_tokens"`
+	OutputTokens             int `json:"output_tokens"`
+	CacheCreationInputTokens int `json:"cache_creation_input_tokens,omitempty"`
+	CacheReadInputTokens     int `json:"cache_read_input_tokens,omitempty"`
+	// Pi-normalized (AgentMessage.usage) and MiniMax / OpenAI-compatible
+	// fields. Both shapes are emitted so the UI can fall through to the
+	// one the provider actually forwards. All are safe to omit from the
+	// wire when the provider doesn't report them.
+	CacheRead        int `json:"cache_read,omitempty"`
+	CacheWrite       int `json:"cache_write,omitempty"`
+	PromptTokens     int `json:"prompt_tokens,omitempty"`
+	CompletionTokens int `json:"completion_tokens,omitempty"`
+	CacheCreation    *struct {
 		Ephemeral5mInputTokens int `json:"ephemeral_5m_input_tokens,omitempty"`
 		Ephemeral1hInputTokens int `json:"ephemeral_1h_input_tokens,omitempty"`
 	} `json:"cache_creation,omitempty"`
@@ -150,6 +162,38 @@ func extractUsage(payload map[string]any) *eventUsage {
 	}
 	if v, ok := toInt64(m["output_tokens"]); ok {
 		out.OutputTokens = int(v)
+	}
+	// Pi-normalized usage (AgentMessage.usage). Pi flattens every provider
+	// into a single { input, output, cacheRead, cacheWrite, totalTokens }
+	// shape; the Pi hook forwards it verbatim for the last assistant
+	// message. Treat as the canonical form when present.
+	if v, ok := toInt64(m["input"]); ok && out.InputTokens == 0 {
+		out.InputTokens = int(v)
+	}
+	if v, ok := toInt64(m["output"]); ok && out.OutputTokens == 0 {
+		out.OutputTokens = int(v)
+	}
+	if v, ok := toInt64(m["cacheRead"]); ok {
+		out.CacheRead = int(v)
+	}
+	if v, ok := toInt64(m["cacheWrite"]); ok {
+		out.CacheWrite = int(v)
+	}
+	// MiniMax / OpenAI-Compatible chat-completions shape. Only fill in
+	// fields the Anthropic / Pi shapes didn't already populate — we
+	// never want to zero-out a real value with a missing sibling.
+	if v, ok := toInt64(m["prompt_tokens"]); ok && out.InputTokens == 0 {
+		out.PromptTokens = int(v)
+		out.InputTokens = int(v)
+	}
+	if v, ok := toInt64(m["completion_tokens"]); ok && out.OutputTokens == 0 {
+		out.CompletionTokens = int(v)
+		out.OutputTokens = int(v)
+	}
+	if ptd, ok := m["prompt_tokens_details"].(map[string]any); ok {
+		if v, ok := toInt64(ptd["cached_tokens"]); ok && v > 0 {
+			out.CacheRead = int(v)
+		}
 	}
 	if v, ok := toInt64(m["cache_creation_input_tokens"]); ok {
 		out.CacheCreationInputTokens = int(v)

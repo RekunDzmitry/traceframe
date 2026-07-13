@@ -12,6 +12,15 @@ export type UnknownRecord = Record<string, unknown>;
 export interface AssistantMessage {
 	role: string;
 	content: unknown;
+	// Pi normalizes every provider into this shape on the AgentMessage.
+	// Optional here because older Pi versions and non-Pi providers omit
+	// them. The hook extracts the last assistant message's model + usage
+	// so the UI can show the real context window and per-turn cache stats
+	// instead of falling back to "unknown model".
+	model?: unknown;
+	provider?: unknown;
+	api?: unknown;
+	usage?: unknown;
 }
 
 export interface SessionStartEvent {
@@ -173,4 +182,37 @@ export function lastAssistantText(messages: AssistantMessage[] | undefined): str
 		return "";
 	}
 	return "";
+}
+
+/**
+ * Pull the model id, provider, and usage block off the last assistant
+ * message. Returns undefined when no assistant message exists or when
+ * neither model nor usage is set.
+ *
+ * Pi's AgentMessage always has a `usage` block on the final assistant
+ * turn; on earlier (or aborted) turns the block may be present with all
+ * zeros. The hook passes the whole `usage` through to the traceframe
+ * server as `last_assistant_usage`, and the Go / JS extractors on the
+ * consumer side know how to interpret both the Pi-normalized form
+ * ({ input, output, cacheRead, cacheWrite, totalTokens, cost }) and the
+ * raw provider form (Anthropic / OpenAI-Compatible / MiniMax).
+ */
+export function lastAssistantMeta(
+	messages: AssistantMessage[] | undefined,
+): { model?: string; provider?: string; usage?: unknown } | undefined {
+	if (!messages || messages.length === 0) return undefined;
+	for (let i = messages.length - 1; i >= 0; i--) {
+		const msg = messages[i];
+		if (msg.role !== "assistant") continue;
+		const model = asString(msg.model);
+		const provider = asString(msg.provider);
+		const usage = isRecord(msg.usage) ? msg.usage : undefined;
+		if (!model && !provider && !usage) return undefined;
+		const out: { model?: string; provider?: string; usage?: unknown } = {};
+		if (model) out.model = model;
+		if (provider) out.provider = provider;
+		if (usage) out.usage = usage;
+		return out;
+	}
+	return undefined;
 }

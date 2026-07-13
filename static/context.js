@@ -14,14 +14,18 @@
  *     cl100k_base, heuristic fallback when the CDN is unreachable)
  *   - derive cache stats from `usage.cache_read_input_tokens` /
  *     `usage.cache_creation.ephemeral_5m_input_tokens` /
- *     `usage.cache_creation.ephemeral_1h_input_tokens` when present,
- *     and fall back to a "re-read == cache hit" proxy when not
+ *     `usage.cache_creation.ephemeral_1h_input_tokens` (Anthropic),
+ *     `usage.cacheRead` / `usage.cacheWrite` (Pi-normalized), or
+ *     `usage.prompt_tokens_details.cached_tokens` (MiniMax /
+ *     OpenAI-Compatible chat-completions) when present, and fall back
+ *     to a "re-read == cache hit" proxy when not
  *
  * The shape returned to the renderer:
  *
  *   {
- *     model: string,             // claude-opus-4-7, gpt-4, codex, ...
- *     provider: string,          // claude | codex | pi | unknown
+ *     model: string,             // claude-opus-4-7, gpt-4, codex,
+ *                               // MiniMax-M3, MiniMax-M2, ...
+ *     provider: string,          // claude | codex | pi | minimax | unknown
  *     totalTokens: number,       // sum across all categories
  *     maxTokens: number,         // context window for the model
  *     percentage: number,        // totalTokens / maxTokens, [0..1+]
@@ -45,13 +49,15 @@
 
   // ---------- Provider / model inference -----------------------------------
 
-  /** Best-effort. Returns one of: "claude" | "codex" | "pi" | "unknown". */
+  /** Best-effort. Returns one of:
+   *  "claude" | "codex" | "pi" | "minimax" | "unknown". */
   function inferProvider(payload) {
     if (!payload || typeof payload !== "object") return "unknown";
     const tp = stringField(payload, "transcript_path", "transcriptPath");
     const cwd = stringField(payload, "cwd");
     const source = stringField(payload, "source").toLowerCase();
-    const haystack = (tp + "\n" + cwd + "\n" + source).toLowerCase();
+    const model = stringField(payload, "model").toLowerCase();
+    const haystack = (tp + "\n" + cwd + "\n" + source + "\n" + model).toLowerCase();
     if (haystack.includes("/.claude/") || haystack.includes("\\.claude\\") || source === "claude") {
       return "claude";
     }
@@ -60,6 +66,13 @@
     }
     if (haystack.includes("/.pi/") || haystack.includes("\\.pi\\") || source === "pi") {
       return "pi";
+    }
+    // MiniMax: the provider reports itself as "minimax" (Pi's AgentMessage
+    // sets `provider: "minimax"`), the model id starts with "minimax-",
+    // or the session lives under a `~/.minimax/...` config dir.
+    if (source === "minimax" || model.startsWith("minimax-") ||
+        haystack.includes("/.minimax/") || haystack.includes("\\.minimax\\")) {
+      return "minimax";
     }
     return "unknown";
   }
@@ -92,6 +105,14 @@
   /** Conservative defaults. Expand as we get accurate numbers from the
    *  agent hooks. The UI's percentage bar uses this as the denominator
    *  even when the actual API limit differs — close enough for a glance. */
+  // Model id → context window (tokens). Numbers come from the official
+  // model cards / API docs — keep these in sync with the source.
+  //
+  // MiniMax (M-series) models: the API accepts both the legacy "MiniMax-..."
+  // and the newer "minimax-..." identifiers. The leading-capital form is
+  // what the API returns today (see platform.minimax.io); we list it first
+  // so the O(1) lookup in getContextWindowForModel hits it before the
+  // case-insensitive scan.
   const MODEL_CONTEXT_WINDOWS = {
     "claude-opus-4-7": 1_000_000,
     "claude-opus-4":   1_000_000,
@@ -108,11 +129,29 @@
     "o1-mini":         128_000,
     "o3-mini":         200_000,
     "codex":           200_000,
+    // MiniMax M-series: M1 / M3 ship with MSA and 1M context; M2 / M2.5 /
+    // M2.7 cap at 200K; M2-her is a 65K dialogue-tuned sibling.
+    "MiniMax-M1": 1_000_000,
+    "MiniMax-M3": 1_000_000,
+    "MiniMax-M2": 200_000,
+    "MiniMax-M2.5": 200_000,
+    "MiniMax-M2.7": 200_000,
+    "MiniMax-M2-her": 65_536,
   };
 
   function getContextWindowForModel(model) {
     if (typeof model === "string" && MODEL_CONTEXT_WINDOWS[model]) {
       return MODEL_CONTEXT_WINDOWS[model];
+    }
+    // Case-insensitive fallback: providers occasionally return identifiers
+    // with a different capitalisation than the model card ("minimax-m3" vs
+    // "MiniMax-M3", "CLAUDE-OPUS-4-7", ...). The table keys are the
+    // canonical form; the runtime is whatever the API hands us.
+    if (typeof model === "string" && model.length > 0) {
+      const lower = model.toLowerCase();
+      for (const key of Object.keys(MODEL_CONTEXT_WINDOWS)) {
+        if (key.toLowerCase() === lower) return MODEL_CONTEXT_WINDOWS[key];
+      }
     }
     // Default to 200k — matches the Claude 3.x / 4.x Sonnet default and
     // the Codex default. OpenAI gpt-4 is the only one we'd miss here.
@@ -175,10 +214,45 @@
       }
     }
     if (!latest) return usage;
+    // Anthropic / OpenAI-Compatible. input_tokens / output_tokens are the
+    // raw names in both — MiniMax reuses the OpenAI names verbatim.
     if (typeof latest.input_tokens === "number") usage.input_tokens = latest.input_tokens;
     if (typeof latest.output_tokens === "number") usage.output_tokens = latest.output_tokens;
     if (typeof latest.cache_creation_input_tokens === "number") usage.cache_creation_input_tokens = latest.cache_creation_input_tokens;
     if (typeof latest.cache_read_input_tokens === "number") usage.cache_read_input_tokens = latest.cache_read_input_tokens;
+    // Pi-normalized usage (AgentMessage.usage). Pi flattens every provider
+    // into { input, output, cacheRead, cacheWrite, totalTokens } and the
+    // hook forwards it verbatim for the last assistant message. Only
+    // fill in fields the raw names didn't already populate — we never
+    // want a missing sibling to zero out a real value.
+    if (typeof latest.input === "number" && usage.input_tokens === 0) {
+      usage.input_tokens = latest.input;
+    }
+    if (typeof latest.output === "number" && usage.output_tokens === 0) {
+      usage.output_tokens = latest.output;
+    }
+    if (typeof latest.cacheRead === "number" && latest.cacheRead > 0 &&
+        usage.cache_read_input_tokens === 0) {
+      usage.cache_read_input_tokens = latest.cacheRead;
+    }
+    if (typeof latest.cacheWrite === "number" && latest.cacheWrite > 0 &&
+        usage.cache_creation_input_tokens === 0) {
+      usage.cache_creation_input_tokens = latest.cacheWrite;
+    }
+    // MiniMax / OpenAI-Compatible chat-completions shape.
+    //   prompt_tokens / completion_tokens → input / output
+    //   prompt_tokens_details.cached_tokens → cache read
+    if (typeof latest.prompt_tokens === "number" && usage.input_tokens === 0) {
+      usage.input_tokens = latest.prompt_tokens;
+    }
+    if (typeof latest.completion_tokens === "number" && usage.output_tokens === 0) {
+      usage.output_tokens = latest.completion_tokens;
+    }
+    const ptd = latest.prompt_tokens_details;
+    if (ptd && typeof ptd === "object" && typeof ptd.cached_tokens === "number" &&
+        ptd.cached_tokens > 0 && usage.cache_read_input_tokens === 0) {
+      usage.cache_read_input_tokens = ptd.cached_tokens;
+    }
     if (latest.cache_creation && typeof latest.cache_creation === "object") {
       usage.cache_creation = {
         ephemeral_5m_input_tokens: typeof latest.cache_creation.ephemeral_5m_input_tokens === "number" ? latest.cache_creation.ephemeral_5m_input_tokens : 0,
@@ -820,6 +894,14 @@
       inferProvider({ cwd: "/Users/me/.codex/work" }) === "codex");
     t("inferProvider: pi via source",
       inferProvider({ source: "pi" }) === "pi");
+    t("inferProvider: minimax via source",
+      inferProvider({ source: "minimax" }) === "minimax");
+    t("inferProvider: minimax via model id",
+      inferProvider({ model: "MiniMax-M3" }) === "minimax");
+    t("inferProvider: minimax via lowercase model id",
+      inferProvider({ model: "minimax-m2" }) === "minimax");
+    t("inferProvider: minimax via config path",
+      inferProvider({ transcript_path: "/Users/me/.minimax/sessions/x.jsonl" }) === "minimax");
     t("inferProvider: unknown on empty",
       inferProvider({}) === "unknown");
 
@@ -828,12 +910,30 @@
       inferModel([{ kind: "assistant_stop", model: "claude-opus-4-7" }]) === "claude-opus-4-7");
     t("inferModel: from payload.model",
       inferModel([{ kind: "tool", payload: { model: "gpt-4" } }]) === "gpt-4");
+    t("inferModel: MiniMax-M3 from payload.model",
+      inferModel([{ kind: "tool", payload: { model: "MiniMax-M3" } }]) === "MiniMax-M3");
     t("inferModel: empty fallback",
       inferModel([]) === "");
 
     // Context window lookup
     t("context window: claude-opus-4-7 → 1M",
       getContextWindowForModel("claude-opus-4-7") === 1_000_000);
+    t("context window: MiniMax-M3 → 1M",
+      getContextWindowForModel("MiniMax-M3") === 1_000_000);
+    t("context window: MiniMax-M1 → 1M",
+      getContextWindowForModel("MiniMax-M1") === 1_000_000);
+    t("context window: MiniMax-M2 → 200K",
+      getContextWindowForModel("MiniMax-M2") === 200_000);
+    t("context window: MiniMax-M2.5 → 200K",
+      getContextWindowForModel("MiniMax-M2.5") === 200_000);
+    t("context window: MiniMax-M2.7 → 200K",
+      getContextWindowForModel("MiniMax-M2.7") === 200_000);
+    t("context window: MiniMax-M2-her → 65K",
+      getContextWindowForModel("MiniMax-M2-her") === 65_536);
+    t("context window: lowercase MiniMax-M3 → 1M",
+      getContextWindowForModel("minimax-m3") === 1_000_000);
+    t("context window: UPPERCASE MINI MAX M2 → 200K",
+      getContextWindowForModel("MINIMAX-M2") === 200_000);
     t("context window: unknown → 200k default",
       getContextWindowForModel("not-a-model") === 200_000);
 
@@ -845,6 +945,50 @@
     t("apiUsage: extracts cache_read", u.cache_read_input_tokens === 200);
     t("apiUsage: marks present", u.present === true);
     t("apiUsage: empty when missing", extractAPIUsage([]).present === false);
+
+    // Pi-normalized usage (AgentMessage.usage from the Pi extension).
+    // event_time is required so extractAPIUsage actually picks the row;
+    // real Go summaries always carry one.
+    const piU = extractAPIUsage([
+      { kind: "assistant_stop", event_time: "2026-07-06T10:00:00Z",
+        usage: { input: 1200, output: 350, cacheRead: 800, cacheWrite: 400, totalTokens: 2350 } },
+    ]);
+    t("apiUsage(Pi): extracts input from .input", piU.input_tokens === 1200);
+    t("apiUsage(Pi): extracts output from .output", piU.output_tokens === 350);
+    t("apiUsage(Pi): cacheRead → cache_read", piU.cache_read_input_tokens === 800);
+    t("apiUsage(Pi): cacheWrite → cache_creation", piU.cache_creation_input_tokens === 400);
+
+    // MiniMax / OpenAI-Compatible chat-completions shape.
+    const mmU = extractAPIUsage([
+      { kind: "assistant_stop", event_time: "2026-07-06T10:00:00Z", usage: {
+        prompt_tokens: 1366,
+        completion_tokens: 293,
+        total_tokens: 1659,
+        prompt_tokens_details: { cached_tokens: 114 },
+      } },
+    ]);
+    t("apiUsage(MiniMax): prompt_tokens → input", mmU.input_tokens === 1366);
+    t("apiUsage(MiniMax): completion_tokens → output", mmU.output_tokens === 293);
+    t("apiUsage(MiniMax): prompt_tokens_details.cached_tokens → cache_read",
+      mmU.cache_read_input_tokens === 114);
+
+    // Anthropic raw fields take priority over Pi / MiniMax when both are
+    // present (e.g. a hook that forwards the AgentMessage verbatim AND
+    // the raw OpenAI usage). Otherwise a real Anthropic value could be
+    // silently overwritten by a missing Pi sibling.
+    const mixed = extractAPIUsage([
+      { kind: "assistant_stop", event_time: "2026-07-06T10:00:00Z", usage: {
+        input_tokens: 5000,
+        output_tokens: 200,
+        cache_read_input_tokens: 4000,
+        input: 1,  // Pi leftover; should NOT clobber input_tokens
+        cacheRead: 999,  // Pi leftover; should NOT clobber cache_read_input_tokens
+      } },
+    ]);
+    t("apiUsage: Anthropic input_tokens not clobbered by Pi .input",
+      mixed.input_tokens === 5000);
+    t("apiUsage: Anthropic cache_read_input_tokens not clobbered by Pi cacheRead",
+      mixed.cache_read_input_tokens === 4000);
 
     // Cache TTL tone
     const nowT = Date.parse("2026-07-06T12:00:00Z");

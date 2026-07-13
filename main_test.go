@@ -1078,3 +1078,127 @@ func TestBackfillSQLFormulaMatchesGo(t *testing.T) {
 		}
 	}
 }
+
+func TestExtractUsageAnthropicShape(t *testing.T) {
+	out := extractUsage(map[string]any{
+		"usage": map[string]any{
+			"input_tokens":               100,
+			"output_tokens":              20,
+			"cache_creation_input_tokens": 30,
+			"cache_read_input_tokens":    400,
+		},
+	})
+	if out == nil {
+		t.Fatal("expected usage, got nil")
+	}
+	if out.InputTokens != 100 || out.OutputTokens != 20 {
+		t.Errorf("input/output = %d/%d, want 100/20", out.InputTokens, out.OutputTokens)
+	}
+	if out.CacheCreationInputTokens != 30 || out.CacheReadInputTokens != 400 {
+		t.Errorf("cache create/read = %d/%d, want 30/400",
+			out.CacheCreationInputTokens, out.CacheReadInputTokens)
+	}
+}
+
+func TestExtractUsagePiNormalizedShape(t *testing.T) {
+	// Pi flattens every provider into { input, output, cacheRead,
+	// cacheWrite, totalTokens }. extractUsage should populate the raw
+	// InputTokens / OutputTokens fields so the Go summary carries the
+	// per-turn numbers AND expose cacheRead / cacheWrite so the
+	// frontend can render the cache TTL.
+	out := extractUsage(map[string]any{
+		"usage": map[string]any{
+			"input":       1200,
+			"output":      350,
+			"cacheRead":   800,
+			"cacheWrite":  400,
+			"totalTokens": 2350,
+		},
+	})
+	if out == nil {
+		t.Fatal("expected usage, got nil")
+	}
+	if out.InputTokens != 1200 || out.OutputTokens != 350 {
+		t.Errorf("Pi input/output = %d/%d, want 1200/350", out.InputTokens, out.OutputTokens)
+	}
+	if out.CacheRead != 800 || out.CacheWrite != 400 {
+		t.Errorf("Pi cache read/write = %d/%d, want 800/400", out.CacheRead, out.CacheWrite)
+	}
+}
+
+func TestExtractUsageMiniMaxShape(t *testing.T) {
+	// MiniMax (OpenAI-Compatible) reports:
+	//   prompt_tokens / completion_tokens / total_tokens
+	//   prompt_tokens_details.cached_tokens
+	out := extractUsage(map[string]any{
+		"usage": map[string]any{
+			"prompt_tokens":      1366,
+			"completion_tokens":  293,
+			"total_tokens":       1659,
+			"prompt_tokens_details": map[string]any{
+				"cached_tokens": 114,
+			},
+		},
+	})
+	if out == nil {
+		t.Fatal("expected usage, got nil")
+	}
+	if out.InputTokens != 1366 || out.OutputTokens != 293 {
+		t.Errorf("MiniMax input/output = %d/%d, want 1366/293", out.InputTokens, out.OutputTokens)
+	}
+	if out.CacheRead != 114 {
+		t.Errorf("MiniMax cached_tokens = %d, want 114", out.CacheRead)
+	}
+	if out.PromptTokens != 1366 || out.CompletionTokens != 293 {
+		t.Errorf("MiniMax raw prompt/completion = %d/%d, want 1366/293",
+			out.PromptTokens, out.CompletionTokens)
+	}
+}
+
+func TestExtractUsageAnthropicNotClobberedByPiShape(t *testing.T) {
+	// When both shapes are present (e.g. a hook that forwards the raw
+	// Anthropic block AND a Pi-shaped sibling), the Anthropic values
+	// win. extractUsage must never zero a real value with a missing
+	// sibling from another provider.
+	out := extractUsage(map[string]any{
+		"usage": map[string]any{
+			// Anthropic raw
+			"input_tokens":               5000,
+			"output_tokens":              200,
+			"cache_read_input_tokens":    4000,
+			"cache_creation_input_tokens": 100,
+			// Pi leftover (provider left these on the same payload)
+			"input":      1,
+			"output":     1,
+			"cacheRead":  999,
+			"cacheWrite": 999,
+		},
+	})
+	if out == nil {
+		t.Fatal("expected usage, got nil")
+	}
+	if out.InputTokens != 5000 {
+		t.Errorf("input_tokens clobbered by Pi .input: got %d, want 5000", out.InputTokens)
+	}
+	if out.OutputTokens != 200 {
+		t.Errorf("output_tokens clobbered by Pi .output: got %d, want 200", out.OutputTokens)
+	}
+	if out.CacheReadInputTokens != 4000 {
+		t.Errorf("cache_read_input_tokens clobbered: got %d, want 4000", out.CacheReadInputTokens)
+	}
+	if out.CacheCreationInputTokens != 100 {
+		t.Errorf("cache_creation_input_tokens clobbered: got %d, want 100", out.CacheCreationInputTokens)
+	}
+}
+
+func TestExtractUsageMissingUsageReturnsNil(t *testing.T) {
+	if out := extractUsage(map[string]any{}); out != nil {
+		t.Errorf("no usage block: want nil, got %+v", out)
+	}
+	if out := extractUsage(map[string]any{"usage": "garbage"}); out != nil {
+		t.Errorf("non-object usage: want nil, got %+v", out)
+	}
+	if out := extractUsage(nil); out != nil {
+		t.Errorf("nil payload: want nil, got %+v", out)
+	}
+}

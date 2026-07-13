@@ -18,6 +18,7 @@ import assert from "node:assert/strict";
 import {
 	isNonUserSource,
 	isRecord,
+	lastAssistantMeta,
 	lastAssistantText,
 	NON_USER_SOURCES,
 	parseAgentEnd,
@@ -250,5 +251,52 @@ describe("lastAssistantText", () => {
 		assert.equal(lastAssistantText([asst(42)]), "");
 		assert.equal(lastAssistantText([asst(null)]), "");
 		assert.equal(lastAssistantText([asst("just a string")]), "just a string");
+	});
+});
+
+describe("lastAssistantMeta", () => {
+	const asst = (overrides: Record<string, unknown> = {}): AssistantMessage => ({
+		role: "assistant",
+		content: "ok",
+		...overrides,
+	});
+	const user = (text: string): AssistantMessage => ({ role: "user", content: text });
+
+	it("returns undefined when no assistant message exists", () => {
+		assert.equal(lastAssistantMeta([user("hi")]), undefined);
+		assert.equal(lastAssistantMeta(undefined), undefined);
+		assert.equal(lastAssistantMeta([]), undefined);
+	});
+
+	it("returns undefined when the last assistant message has no model or usage", () => {
+		assert.equal(lastAssistantMeta([asst()]), undefined);
+	});
+
+	it("extracts the model id", () => {
+		assert.deepEqual(lastAssistantMeta([asst({ model: "MiniMax-M3" })]), { model: "MiniMax-M3" });
+	});
+
+	it("extracts model + provider + Pi-normalized usage", () => {
+		const usage = { input: 1200, output: 350, cacheRead: 800, cacheWrite: 400, totalTokens: 2350 };
+		assert.deepEqual(
+			lastAssistantMeta([asst({ model: "MiniMax-M3", provider: "minimax", usage })]),
+			{ model: "MiniMax-M3", provider: "minimax", usage },
+		);
+	});
+
+	it("drops non-record usage payloads (e.g. null, primitives)", () => {
+		assert.equal(lastAssistantMeta([asst({ model: "x", usage: null })])?.usage, undefined);
+		assert.equal(lastAssistantMeta([asst({ model: "x", usage: 7 })])?.usage, undefined);
+	});
+
+	it("prefers the LAST assistant message in the conversation", () => {
+		assert.deepEqual(
+			lastAssistantMeta([
+				asst({ model: "claude-opus-4-7" }),
+				user("interrupt"),
+				asst({ model: "MiniMax-M3" }),
+			]),
+			{ model: "MiniMax-M3" },
+		);
 	});
 });

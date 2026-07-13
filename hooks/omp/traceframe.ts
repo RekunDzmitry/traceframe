@@ -10,7 +10,8 @@
  *   input                -> UserPromptSubmit
  *   tool_execution_start -> PreToolUse
  *   tool_execution_end   -> PostToolUse
- *   agent_end            -> Stop  (with last_assistant_message)
+ *   agent_end            -> Stop  (with last_assistant_message,
+ *                                         model, provider, usage)
  *   session_shutdown     -> SessionEnd
  *
  * Self-contained install:
@@ -68,6 +69,15 @@ export type UnknownRecord = Record<string, unknown>;
 export interface AssistantMessage {
 	role: string;
 	content: unknown;
+	// Pi-normalized model / provider / usage. Optional because older Pi
+	// versions and non-Pi providers omit them. The hook extracts them off
+	// the last assistant message so the UI's Context Usage Map knows the
+	// real model id and per-turn cache stats instead of falling back to
+	// "unknown model" + 200K (the Anthropic Sonnet default).
+	model?: unknown;
+	provider?: unknown;
+	api?: unknown;
+	usage?: unknown;
 }
 
 export interface SessionStartEvent {
@@ -248,6 +258,39 @@ export function lastAssistantText(messages: AssistantMessage[] | undefined): str
 	return "";
 }
 
+/**
+ * Pull the model id, provider, and usage block off the last assistant
+ * message. Returns undefined when no assistant message exists or when
+ * neither model nor usage is set.
+ *
+ * Pi's AgentMessage always has a `usage` block on the final assistant
+ * turn; on earlier (or aborted) turns the block may be present with all
+ * zeros. The hook passes the whole `usage` through to the traceframe
+ * server as `last_assistant_usage`, and the Go / JS extractors on the
+ * consumer side know how to interpret both the Pi-normalized form
+ * ({ input, output, cacheRead, cacheWrite, totalTokens, cost }) and the
+ * raw provider form (Anthropic / OpenAI-Compatible / MiniMax).
+ */
+export function lastAssistantMeta(
+	messages: AssistantMessage[] | undefined,
+): { model?: string; provider?: string; usage?: unknown } | undefined {
+	if (!messages || messages.length === 0) return undefined;
+	for (let i = messages.length - 1; i >= 0; i--) {
+		const msg = messages[i];
+		if (msg.role !== "assistant") continue;
+		const model = asString(msg.model);
+		const provider = asString(msg.provider);
+		const usage = isRecord(msg.usage) ? msg.usage : undefined;
+		if (!model && !provider && !usage) return undefined;
+		const out: { model?: string; provider?: string; usage?: unknown } = {};
+		if (model) out.model = model;
+		if (provider) out.provider = provider;
+		if (usage) out.usage = usage;
+		return out;
+	}
+	return undefined;
+}
+
 // --- Context-bound session helpers ----------------------------------------
 
 function sessionID(ctx: ExtensionContext): string {
@@ -411,14 +454,23 @@ export default function (pi: ExtensionAPI) {
 	});
 
 	// Stop: the agent has finished a turn. We forward the final assistant
-	// text so the UI can show it the same way it shows Claude's
-	// last_assistant_message on Stop events.
+	// text, the model id, the provider, and the usage block so the UI can
+	// show it the same way it shows Claude's last_assistant_message on
+	// Stop events AND know the right context window + per-turn cache
+	// stats. Without model + usage the Context Usage Map falls back to
+	// "unknown model" and 200K (the Anthropic Sonnet default) — wrong
+	// for MiniMax (1M) and most other non-Claude providers.
 	pi.on("agent_end", async (event, ctx) => {
 		const e = parseAgentEnd(event);
 		if (!e) return;
-		fire(ctx, "Stop", { messageCount: e.messages.length }, {
+		const meta = lastAssistantMeta(e.messages);
+		const extras: UnknownRecord = {
 			last_assistant_message: lastAssistantText(e.messages),
-		});
+		};
+		if (meta?.model) extras.model = meta.model;
+		if (meta?.provider) extras.provider = meta.provider;
+		if (meta?.usage) extras.last_assistant_usage = meta.usage;
+		fire(ctx, "Stop", { messageCount: e.messages.length }, extras);
 	});
 
 	// SessionEnd: when the session runtime is torn down (exit, /new,
