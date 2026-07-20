@@ -26,12 +26,16 @@
  *     maxTokens: number,         // context window for the model
  *     percentage: number,        // totalTokens / maxTokens, [0..1+]
  *     categories: Category[],    // System prompt, Tools, Skills, Messages, ...
- *     gridRows: Square[][],      // 10x10 = 100 squares, 1% each
+ *     grid: GridItem[],          // proportional strip entries, no padding
  *     apiUsage: { input_tokens, output_tokens,
  *                 cache_creation_input_tokens,
  *                 cache_read_input_tokens } | null,
  *     messages: MessageBlock[],  // one per message, with cache stats + size hint
  *   }
+ *
+ * `grid` items are { kind, weight, tokens, categoryName, children? }. The
+ * `messages` kind nests per-message children for sub-tiling inside its
+ * strip. Weights sum to ~1 across visible categories (no free placeholders).
  *
  * `messages` is the click target: clicking a block in the UI looks up
  * its `id` here and opens a dialog with the full content. The block id
@@ -519,46 +523,41 @@
     const totalTokens = categories.reduce((s, c) => s + c.tokens, 0);
     const percentage = maxTokens > 0 ? (totalTokens / maxTokens) : 0;
 
-    // Build the grid: TOTAL_SQUARES cells, token-proportional. We pack
-    // category → count of cells, then fill each cell with the category's
-    // color. For "Messages" cells, we layer in cache-info so the renderer
-    // can vary per-cell.
-    const TOTAL_SQUARES = 100;
-    const gridSquares = [];
+    // Build the proportional grid: one entry per category whose tokens
+    // contribute, with a `weight` = its share of used tokens. The renderer
+    // paints each entry as a strip whose flex-grow equals its weight, so
+    // the bar fills its container exactly — no fake placeholder cells.
+    // Free space becomes real whitespace on the right (or below, on
+    // narrow viewports).
+    //
+    // For the `messages` category we nest `children[]` so the renderer
+    // can sub-tile the messages strip with one tile per message block.
+    const totalUsed = totalTokens;
+    const grid = [];
     for (const cat of categories) {
       if (cat.tokens <= 0) continue;
-      const exact = (cat.tokens / Math.max(maxTokens, 1)) * TOTAL_SQUARES;
-      const whole = Math.floor(exact);
-      const frac = exact - whole;
-      for (let i = 0; i < whole; i++) {
-        gridSquares.push(makeSquare(cat, i, whole, 1.0, model));
+      const weight = totalUsed > 0 ? (cat.tokens / totalUsed) : 0;
+      const item = {
+        kind: cat.kind,
+        weight,
+        tokens: cat.tokens,
+        categoryName: cat.name,
+      };
+      if (cat.kind === "messages"
+          && Array.isArray(cat.message_blocks)
+          && cat.message_blocks.length > 0) {
+        const blocks = cat.message_blocks;
+        const msgTotal = blocks.reduce((s, b) => s + (b.tokens > 0 ? b.tokens : 0), 0) || 1;
+        item.children = blocks.map((b) => ({
+          id: b.id,
+          kind: b.kind,
+          weight: msgTotal > 0 ? ((b.tokens > 0 ? b.tokens : 0) / msgTotal) : 0,
+          tokens: b.tokens || 0,
+          hit_count: (b.cache && b.cache.hit_count) || 0,
+          cache: b.cache || null,
+        }));
       }
-      if (frac > 0) {
-        gridSquares.push(makeSquare(cat, whole, whole, frac, model));
-      }
-    }
-    // Free space: pad the grid up to TOTAL_SQUARES with outlined free cells.
-    while (gridSquares.length < TOTAL_SQUARES) {
-      gridSquares.push({
-        color: "free",
-        isFilled: false,
-        categoryName: "Free space",
-        tokens: 0,
-        percentage: 0,
-        squareFullness: 0,
-        kind: "free",
-      });
-    }
-    // Autocompact buffer at the end (decorative; the actual model window
-    // already accounts for this — we mark it as a visual hint).
-    if (gridSquares.length > TOTAL_SQUARES) {
-      gridSquares.length = TOTAL_SQUARES;
-    }
-    // Split into rows of 10.
-    const GRID_WIDTH = 10;
-    const gridRows = [];
-    for (let i = 0; i < gridSquares.length; i += GRID_WIDTH) {
-      gridRows.push(gridSquares.slice(i, i + GRID_WIDTH));
+      grid.push(item);
     }
 
     return {
@@ -568,7 +567,7 @@
       maxTokens,
       percentage,
       categories,
-      gridRows,
+      grid,
       apiUsage: apiUsage.present ? {
         input_tokens: apiUsage.input_tokens,
         output_tokens: apiUsage.output_tokens,
@@ -577,18 +576,6 @@
         cache_creation: apiUsage.cache_creation,
       } : null,
       messages,
-    };
-  }
-
-  function makeSquare(cat, indexInCat, totalInCat, fullness, model) {
-    return {
-      color: cat.kind,
-      isFilled: fullness > 0,
-      categoryName: cat.name,
-      tokens: Math.round(cat.tokens * (fullness / totalInCat || 0)),
-      percentage: 0, // filled in renderer if needed
-      squareFullness: fullness,
-      kind: cat.kind,
     };
   }
 
@@ -609,173 +596,330 @@
     return "fresh-long";
   }
 
-  // Block size: a base radius + hit_count * step. Capped at 1.4× so blocks
-  // don't dominate the grid. Blocks with no hits keep the base size.
-  function blockSizePx(hitCount) {
-    const base = 8;
-    const step = Math.min(8, hitCount || 0);
-    return base + step;
+  /** Tile size for a single message block: width = height = base +
+   *  (max-base) * sqrt(weight), so the tile's area scales linearly with
+   *  the block's token share of the messages category. Caps at `max` so a
+   *  single dominant block can't dominate the strip. */
+  function blockSizePx(tokens, totalTokens) {
+    const share = totalTokens > 0 ? (tokens / totalTokens) : 0;
+    const base = 14;
+    const max = 36;
+    const clamped = share < 0 ? 0 : (share > 1 ? 1 : share);
+    return Math.round(base + (max - base) * Math.sqrt(clamped));
   }
 
-  // Click handler registry: each message block has a `data-block-id` and
-  // the container catches clicks and dispatches to the registered handler.
-  let clickHandler = null;
+  // ---------- Renderer ------------------------------------------------------
+  //
+  // The renderer is split into two halves so we can test the structural
+  // output without a DOM:
+  //
+  //   * build*Tree() functions return plain-object trees shaped like
+  //     { tag, class, attrs, children } (recursively). These are pure and
+  //     easy to assert on in runTests.
+  //
+  //   * mountTree() walks a tree and builds real DOM nodes. All DOM
+  //     touching happens here; the builders never call document.*.
+  //
+  // renderContextUsageMap() ties the two together.
+
+  function buildHeaderTree(data) {
+    const pct = (data.percentage * 100).toFixed(1);
+    const subChildren = [
+      { text: data.model || "unknown model", className: "ctx-header__model" },
+      { text: " · " },
+      {
+        text:
+          formatTokens(data.totalTokens) + " / " + formatTokens(data.maxTokens)
+          + " tokens (" + pct + "%)",
+        className: "ctx-header__tokens",
+      },
+    ];
+    if (data.apiUsage && data.apiUsage.cache_read_input_tokens > 0) {
+      const cached = data.apiUsage.cache_read_input_tokens;
+      const created = data.apiUsage.cache_creation_input_tokens || 0;
+      subChildren.push({
+        text: " · " + formatTokens(cached) + " cache hits (" + formatTokens(created) + " created)",
+        className: "ctx-header__cache",
+      });
+    }
+    return {
+      tag: "div",
+      className: "ctx-header",
+      children: [
+        { tag: "h2", className: "ctx-header__title", text: "Context Usage" },
+        { tag: "div", className: "ctx-header__sub", children: subChildren },
+      ],
+    };
+  }
+
+  function buildLegendTree(data) {
+    // Always include the four category kinds, even when some are absent
+    // from this session — keeps the legend stable across sessions.
+    const kinds = [
+      { kind: "system_prompt", label: "System prompt" },
+      { kind: "system_tools", label: "System tools" },
+      { kind: "skills", label: "Skills" },
+      { kind: "messages", label: "Messages" },
+    ];
+    const items = kinds.map((k) => ({
+      tag: "span",
+      className: "ctx-legend__item",
+      children: [
+        {
+          tag: "span",
+          className: "ctx-legend__sw ctx-legend__sw--" + k.kind,
+          attrs: { "aria-hidden": "true" },
+        },
+        { text: k.label },
+      ],
+    }));
+    return {
+      tag: "div",
+      className: "ctx-legend",
+      attrs: { role: "list" },
+      children: items,
+    };
+  }
+
+  function buildGridTree(data) {
+    const now = Date.now();
+    const cats = Array.isArray(data.grid) ? data.grid : [];
+    const catChildren = cats.map((c) => {
+      const isMessages = c.kind === "messages";
+      const subChildren = isMessages && Array.isArray(c.children)
+        ? c.children.map((sub) => {
+            const tone = cacheTone(sub.cache, now);
+            const node = {
+              tag: "div",
+              className: "ctx-grid__sub",
+              attrs: {
+                "data-block-id": sub.id || "",
+                "data-kind": sub.kind || "",
+                title: buildMsgTitle(sub),
+              },
+              style: { flexGrow: String(sub.weight || 0) },
+            };
+            if (tone) node.className += " ctx-grid__sub--ttl-" + tone;
+            return node;
+          })
+        : null;
+      const node = {
+        tag: "div",
+        className: "ctx-grid__cat ctx-grid__cat--" + (c.kind || "unknown"),
+        attrs: {
+          title: (c.categoryName || c.kind) + " · " + formatTokens(c.tokens || 0),
+        },
+        style: { flexGrow: String(c.weight || 0) },
+      };
+      if (subChildren) {
+        node.children = subChildren;
+        node.attrs["data-has-children"] = "1";
+      }
+      return node;
+    });
+    return [
+      {
+        tag: "div",
+        className: "ctx-grid",
+        attrs: { "data-kind": "grid" },
+        children: [{ tag: "div", className: "ctx-grid__strip", children: catChildren }],
+      },
+      buildLegendTree(data),
+    ];
+  }
+
+  function buildMsgTitle(b) {
+    const tipParts = [];
+    tipParts.push((b.kind || "block") + (b.tool_name ? " · " + b.tool_name : ""));
+    if (b.text) tipParts.push(firstLine(b.text, 80));
+    if (b.tokens) tipParts.push(formatTokens(b.tokens) + " tokens");
+    const hits = b.hit_count || 0;
+    if (hits > 0) tipParts.push(hits + " cache hit" + (hits === 1 ? "" : "s"));
+    if (b.cache && b.cache.ttl_kind) tipParts.push("ttl " + b.cache.ttl_kind);
+    if (b.cache && b.cache.expires_at) {
+      const rem = Math.max(0, Date.parse(b.cache.expires_at) - Date.now());
+      tipParts.push("expires in " + formatAge(rem));
+    }
+    return tipParts.join("\n");
+  }
+
+  function buildMsgTree(data) {
+    const msgs = Array.isArray(data.messages) ? data.messages : [];
+    const msgTotal = msgs.reduce((s, b) => s + (b.tokens > 0 ? b.tokens : 0), 0);
+    const tiles = msgs.map((b) => {
+      const hits = (b.cache && b.cache.hit_count) || 0;
+      const sz = blockSizePx(b.tokens || 0, msgTotal);
+      const tone = cacheTone(b.cache, Date.now());
+      const node = {
+        tag: "button",
+        className: "ctx-msg ctx-msg__border--" + (b.kind || "unknown"),
+        attrs: {
+          type: "button",
+          "data-block-id": b.id,
+          title: buildMsgTitle({
+            kind: b.kind,
+            tool_name: b.tool_name,
+            text: b.text,
+            tokens: b.tokens,
+            hit_count: hits,
+            cache: b.cache,
+          }),
+        },
+        style: { width: sz + "px", height: sz + "px" },
+      };
+      if (tone) node.className += " ctx-msg--ttl-" + tone;
+      // Hits badge: small bottom-right pill so size stays token-driven.
+      if (hits > 0) {
+        node.children = [
+          {
+            tag: "span",
+            className: "ctx-msg__badge",
+            text: hits > 99 ? "99+" : "" + hits,
+          },
+        ];
+      }
+      return node;
+    });
+    if (tiles.length === 0) return null;
+    return {
+      tag: "div",
+      className: "ctx-msgs",
+      children: [
+        {
+          tag: "div",
+          className: "ctx-msgs__header",
+          children: [
+            { tag: "span", className: "ctx-msgs__title", text: "Message blocks" },
+            {
+              tag: "span",
+              className: "ctx-msgs__sub",
+              text: "color = cache expiration · size = tokens · border = kind",
+            },
+          ],
+        },
+        { tag: "div", className: "ctx-msg-grid", children: tiles },
+      ],
+    };
+  }
+
+  function buildCategoryListTree(data) {
+    const rows = (data.categories || []).map((c) => {
+      const pct = ((c.tokens / Math.max(data.maxTokens, 1)) * 100).toFixed(1) + "%";
+      return {
+        tag: "div",
+        className: "ctx-cat ctx-cat--" + (c.kind || "unknown"),
+        children: [
+          {
+            tag: "div",
+            className: "ctx-cat__row",
+            children: [
+              {
+                tag: "div",
+                className: "ctx-cat__left",
+                children: [
+                  { tag: "span", className: "ctx-cat__name", text: c.name },
+ { tag: "span", className: "ctx-cat__tokens", text: formatTokens(c.tokens) },
+ { tag: "span", className: "ctx-cat__pct", text: pct },
+                ],
+              },
+              {
+                tag: "div",
+                className: "ctx-cat__bar",
+                children: [
+                  {
+ tag: "div",
+ className: "ctx-cat__bar-fill ctx-cat__bar-fill--" + (c.kind || "unknown"),
+                    style: {
+                      width:
+                        Math.min(100, (c.tokens / Math.max(data.maxTokens, 1)) * 100) + "%",
+                    },
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      };
+    });
+    return { tag: "div", className: "ctx-cats", children: rows };
+  }
+
+  /** Mount a plain-object tree into a real DOM container. Each node is
+   *  { tag, className?, text?, attrs?, style?, children? }. Strings/numbers
+   *  in `children` become text nodes. */
+  function mountTree(tree, container) {
+    const node = document.createElement(tree.tag || "div");
+    if (tree.className) node.className = tree.className;
+    if (tree.attrs) {
+      for (const k in tree.attrs) {
+        const v = tree.attrs[k];
+        if (v == null) continue;
+        node.setAttribute(k, String(v));
+      }
+    }
+    if (tree.style) {
+      for (const k in tree.style) node.style[k] = tree.style[k];
+    }
+    if (tree.text != null) node.textContent = String(tree.text);
+    if (tree.children) {
+      for (const ch of tree.children) {
+        if (ch == null) continue;
+        if (typeof ch === "string" || typeof ch === "number") {
+          node.appendChild(document.createTextNode(String(ch)));
+        } else if (ch.text != null && !ch.tag) {
+          node.appendChild(document.createTextNode(String(ch.text)));
+        } else {
+          node.appendChild(mountTree(ch, container));
+        }
+      }
+    }
+    return node;
+  }
+
+  function buildEmptyTree() {
+    return {
+      tag: "div",
+      className: "ctx-empty",
+      text: "No context captured for this session yet.",
+    };
+  }
 
   function renderContextUsageMap(data, container, callbacks) {
     callbacks = callbacks || {};
     container.textContent = "";
     if (!data || !data.categories || data.categories.length === 0) {
-      const empty = document.createElement("div");
-      empty.className = "ctx-empty";
-      empty.textContent = "No context captured for this session yet.";
-      container.appendChild(empty);
+      container.appendChild(mountTree(buildEmptyTree(), container));
       return;
     }
 
-    // --- Header ------------------------------------------------------------
-    const header = document.createElement("div");
-    header.className = "ctx-header";
-    const title = document.createElement("h2");
-    title.className = "ctx-header__title";
-    title.textContent = "Context Usage";
-    const sub = document.createElement("div");
-    sub.className = "ctx-header__sub";
-    const pct = (data.percentage * 100).toFixed(1);
-    sub.innerHTML = "";
-    const modelSpan = document.createElement("span");
-    modelSpan.className = "ctx-header__model";
-    modelSpan.textContent = data.model || "unknown model";
-    const sep1 = document.createElement("span");
-    sep1.textContent = " · ";
-    const tokensSpan = document.createElement("span");
-    tokensSpan.className = "ctx-header__tokens";
-    tokensSpan.textContent = formatTokens(data.totalTokens) + " / " + formatTokens(data.maxTokens) + " tokens (" + pct + "%)";
-    sub.append(modelSpan, sep1, tokensSpan);
-    if (data.apiUsage && data.apiUsage.cache_read_input_tokens > 0) {
-      const cacheSpan = document.createElement("span");
-      cacheSpan.className = "ctx-header__cache";
-      const cached = data.apiUsage.cache_read_input_tokens;
-      const created = data.apiUsage.cache_creation_input_tokens || 0;
-      cacheSpan.textContent = " · " + formatTokens(cached) + " cache hits (" + formatTokens(created) + " created)";
-      sub.appendChild(cacheSpan);
-    }
-    header.append(title, sub);
-    container.appendChild(header);
+    // Header
+    container.appendChild(mountTree(buildHeaderTree(data), container));
 
-    // --- Grid (one continuous strip of squares) ---------------------------
-    const grid = document.createElement("div");
-    grid.className = "ctx-grid";
-    grid.dataset.kind = "grid";
-    let squareIdx = 0;
-    for (let r = 0; r < data.gridRows.length; r++) {
-      const row = document.createElement("div");
-      row.className = "ctx-grid__row";
-      for (let c = 0; c < data.gridRows[r].length; c++) {
-        const sq = data.gridRows[r][c];
-        const cell = document.createElement("div");
-        cell.className = "ctx-grid__cell ctx-grid__cell--" + (sq.color || "free");
-        if (sq.isFilled) {
-          cell.style.opacity = (0.4 + 0.6 * sq.squareFullness).toFixed(2);
-        } else {
-          cell.classList.add("ctx-grid__cell--free");
-        }
-        cell.title = sq.categoryName + " · " + formatTokens(sq.tokens);
-        row.appendChild(cell);
-        squareIdx++;
+    // Grid + legend
+    const gridTrees = buildGridTree(data);
+    for (const t of gridTrees) {
+      container.appendChild(mountTree(t, container));
+    }
+
+    // Message tiles (click → modal)
+    const msgTree = buildMsgTree(data);
+    if (msgTree) {
+      const msgNode = mountTree(msgTree, container);
+      container.appendChild(msgNode);
+      const grid = msgNode.querySelector(".ctx-msg-grid");
+      if (grid) {
+        grid.addEventListener("click", (e) => {
+          const t = e.target.closest("[data-block-id]");
+          if (!t) return;
+          const id = t.dataset.blockId;
+          const block = (data.messages || []).find((b) => b.id === id);
+          if (block && callbacks.onItemClick) callbacks.onItemClick(block);
+        });
       }
-      grid.appendChild(row);
-    }
-    container.appendChild(grid);
-
-    // --- Message grid (per-message blocks, colored by cache TTL, sized by
-    //     hit count) -------------------------------------------------------
-    if (data.messages && data.messages.length > 0) {
-      const msgWrap = document.createElement("div");
-      msgWrap.className = "ctx-msgs";
-      const msgHeader = document.createElement("div");
-      msgHeader.className = "ctx-msgs__header";
-      const mh = document.createElement("span");
-      mh.className = "ctx-msgs__title";
-      mh.textContent = "Message blocks";
-      const mhSub = document.createElement("span");
-      mhSub.className = "ctx-msgs__sub";
-      mhSub.textContent = "color = cache expiration · size = cache hits · click for content";
-      msgHeader.append(mh, mhSub);
-      msgWrap.appendChild(msgHeader);
-
-      const msgGrid = document.createElement("div");
-      msgGrid.className = "ctx-msg-grid";
-      for (const b of data.messages) {
-        const cell = document.createElement("button");
-        cell.type = "button";
-        cell.className = "ctx-msg ctx-msg--" + b.kind;
-        const tone = cacheTone(b.cache, Date.now());
-        if (tone) cell.classList.add("ctx-msg--ttl-" + tone);
-        cell.dataset.blockId = b.id;
-        const hits = (b.cache && b.cache.hit_count) || 0;
-        const sz = blockSizePx(hits);
-        cell.style.width = sz + "px";
-        cell.style.height = sz + "px";
-        // Tooltip with the message details + cache info.
-        const tipParts = [];
-        tipParts.push(b.kind + (b.tool_name ? " · " + b.tool_name : ""));
-        if (b.text) tipParts.push(firstLine(b.text, 80));
-        if (b.tokens) tipParts.push(formatTokens(b.tokens) + " tokens");
-        if (hits > 0) tipParts.push(hits + " cache hit" + (hits === 1 ? "" : "s"));
-        if (b.cache && b.cache.ttl_kind) tipParts.push("ttl " + b.cache.ttl_kind);
-        if (b.cache && b.cache.expires_at) {
-          const rem = Math.max(0, Date.parse(b.cache.expires_at) - Date.now());
-          tipParts.push("expires in " + formatAge(rem));
-        }
-        cell.title = tipParts.join("\n");
-        msgGrid.appendChild(cell);
-      }
-      msgWrap.appendChild(msgGrid);
-      container.appendChild(msgWrap);
-
-      // Wire up click → dialog. The dialog itself lives in index.html.
-      msgGrid.addEventListener("click", (e) => {
-        const t = e.target.closest("[data-block-id]");
-        if (!t) return;
-        const id = t.dataset.blockId;
-        const block = data.messages.find((b) => b.id === id);
-        if (block && callbacks.onItemClick) callbacks.onItemClick(block);
-      });
     }
 
-    // --- Per-category list ------------------------------------------------
-    const list = document.createElement("div");
-    list.className = "ctx-cats";
-    for (const c of data.categories) {
-      const row = document.createElement("div");
-      row.className = "ctx-cat ctx-cat--" + c.kind;
-      const left = document.createElement("div");
-      left.className = "ctx-cat__left";
-      const name = document.createElement("span");
-      name.className = "ctx-cat__name";
-      name.textContent = c.name;
-      const tokens = document.createElement("span");
-      tokens.className = "ctx-cat__tokens";
-      tokens.textContent = formatTokens(c.tokens);
-      const pctSpan = document.createElement("span");
-      pctSpan.className = "ctx-cat__pct";
-      pctSpan.textContent = ((c.tokens / Math.max(data.maxTokens, 1)) * 100).toFixed(1) + "%";
-      left.append(name, tokens, pctSpan);
-
-      const bar = document.createElement("div");
-      bar.className = "ctx-cat__bar";
-      const fill = document.createElement("div");
-      fill.className = "ctx-cat__bar-fill ctx-cat__bar-fill--" + c.kind;
-      fill.style.width = Math.min(100, (c.tokens / Math.max(data.maxTokens, 1)) * 100) + "%";
-      bar.appendChild(fill);
-
-      const wrap = document.createElement("div");
-      wrap.className = "ctx-cat__row";
-      wrap.append(left, bar);
-      row.appendChild(wrap);
-      list.appendChild(row);
-    }
-    container.appendChild(list);
+    // Per-category list
+    container.appendChild(mountTree(buildCategoryListTree(data), container));
   }
 
   // ---------- Helpers -------------------------------------------------------
@@ -878,6 +1022,113 @@
     t("formatTokens: 1500 → '1.5K'", formatTokens(1500) === "1.5K");
     t("formatTokens: 1.2M → '1.2M'", formatTokens(1_200_000) === "1.2M");
 
+    // blockSizePx: tile area scales with token share via sqrt.
+    t("blockSizePx: 0 → base",
+      blockSizePx(0, 1000) === 14);
+    t("blockSizePx: full share → max",
+      blockSizePx(1000, 1000) === 36);
+    t("blockSizePx: half share → between base and max",
+      (function () {
+        const sz = blockSizePx(500, 1000);
+        return sz > 14 && sz < 36;
+      })());
+    t("blockSizePx: monotonic across sweep",
+      (function () {
+        let prev = blockSizePx(0, 1000);
+        for (let i = 1; i <= 10; i++) {
+          const cur = blockSizePx(i * 100, 1000);
+          if (cur < prev) return false;
+          prev = cur;
+        }
+        return true;
+      })());
+
+    // Tree builders: pure, no DOM. Build stub data shaped like the real
+    // aggregator output and assert structural properties.
+    const stubData = {
+      model: "claude-opus-4-7",
+      provider: "claude",
+      totalTokens: 6200,
+      maxTokens: 200_000,
+      percentage: 0.031,
+      categories: [
+        { kind: "system_prompt", name: "System prompt", tokens: 1500, items: [] },
+        { kind: "system_tools", name: "System tools", tokens: 700, items: [] },
+        { kind: "messages", name: "Messages", tokens: 4000, items: [] },
+      ],
+      grid: [
+        { kind: "system_prompt", weight: 0.242, tokens: 1500, categoryName: "System prompt" },
+        { kind: "system_tools", weight: 0.113, tokens: 700, categoryName: "System tools" },
+ {
+          kind: "messages", weight: 0.645, tokens: 4000, categoryName: "Messages",
+          children: [
+ { id: "m:u1", kind: "user", weight: 0.25, tokens: 1000, hit_count: 0, cache: null },
+ { id: "m:a1", kind: "assistant", weight: 0.5, tokens: 2000, hit_count: 2, cache: { hit_count: 2, ttl_kind: "5m", expires_at: new Date(Date.now() + 60_000).toISOString() } },
+ { id: "m:t1", kind: "tool_call", weight: 0.25, tokens: 1000, hit_count: 0, cache: null },
+          ],
+        },
+      ],
+      messages: [
+ { id: "m:u1", kind: "user", tokens: 1000, text: "hi", tool_name: "", cache: null },
+ { id: "m:a1", kind: "assistant", tokens: 2000, text: "hello back", tool_name: "", cache: { hit_count: 2, ttl_kind: "5m", expires_at: new Date(Date.now() + 60_000).toISOString() } },
+ { id: "m:t1", kind: "tool_call", tokens: 1000, text: "Read", tool_name: "Read", cache: null },
+      ],
+      apiUsage: null,
+    };
+
+    // buildHeaderTree
+    const hdr = buildHeaderTree(stubData);
+    t("headerTree: class ctx-header", hdr && hdr.className === "ctx-header");
+    t("headerTree: title is 'Context Usage'",
+      hdr.children[0] && hdr.children[0].text === "Context Usage");
+
+    // buildGridTree: returns [grid, legend].
+    const gridTrees = buildGridTree(stubData);
+    t("gridTree: returns [grid, legend]",
+      Array.isArray(gridTrees) && gridTrees.length === 2);
+    t("gridTree: first child is the strip wrapper",
+      gridTrees[0].children[0].className === "ctx-grid__strip");
+    t("gridTree: one cat per visible category (no free padding)",
+      gridTrees[0].children[0].children.length === 3);
+    t("gridTree: weights sum to ~1.0 across cats",
+      Math.abs(gridTrees[0].children[0].children.reduce((s, c) => s + (Number(c.style.flexGrow) || 0), 0) - 1.0) < 0.01);
+    t("gridTree: messages cat has sub-tile children",
+      gridTrees[0].children[0].children[2].children
+        && gridTrees[0].children[0].children[2].children.length === 3);
+    t("gridTree: sub-tile child weights sum to ~1.0 within messages",
+      Math.abs(gridTrees[0].children[0].children[2].children.reduce((s, c) => s + (Number(c.style.flexGrow) || 0), 0) - 1.0) < 0.01);
+    t("gridTree: legend lists all 4 category kinds",
+      gridTrees[1].children.length === 4
+        && gridTrees[1].children.every((c) => c.className && c.className.indexOf("ctx-legend__item") === 0));
+
+    // buildMsgTree: one tile per message, square (border-radius not 50%).
+    const msgTree = buildMsgTree(stubData);
+    t("msgTree: wraps tiles in ctx-msg-grid",
+      msgTree && msgTree.children[1].className === "ctx-msg-grid");
+    t("msgTree: one tile per message",
+      msgTree.children[1].children.length === 3);
+    t("msgTree: tile size uses blockSizePx (square, in 14–36 range)",
+ (function () {
+ const tile = msgTree.children[1].children[1];
+ const w = parseInt(tile.style.width, 10);
+ const h = parseInt(tile.style.height, 10);
+ return w === h && w >= 14 && w <= 36;
+ })());
+    t("msgTree: hits badge present on tiles with cache hits",
+      msgTree.children[1].children[1].children
+        && msgTree.children[1].children[1].children[0].className === "ctx-msg__badge");
+    t("msgTree: TTL palette class applied when cache tone exists",
+      /ctx-msg--ttl-/.test(msgTree.children[1].children[1].className));
+    t("msgTree: returns null when no messages",
+      buildMsgTree({ messages: [] }) === null);
+
+    // buildCategoryListTree: one row per category.
+    const catsTree = buildCategoryListTree(stubData);
+    t("catsTree: one row per category",
+      catsTree.children.length === stubData.categories.length);
+ t("catsTree: bar fill uses ctx-cat__bar-fill--kind class",
+      catsTree.children[0].children[0].children[1].children[0].className.indexOf("ctx-cat__bar-fill--system_prompt") >= 0);
+
     return results;
   }
 
@@ -885,9 +1136,14 @@
 
   window.Traceframe = window.Traceframe || {};
   window.Traceframe.context = {
-    // New surface (replaces the old buildContextBlocks / renderContextView).
+    // Aggregator + renderer.
     buildContextUsageMap,
     renderContextUsageMap,
+    // Pure tree builders (tested without a DOM).
+    buildHeaderTree,
+    buildGridTree,
+    buildMsgTree,
+    buildCategoryListTree,
     runTests,
     // Public helpers, useful for the modal + smoke tests.
     inferProvider,

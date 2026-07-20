@@ -897,7 +897,10 @@
         font-variant-numeric: tabular-nums;
       }
 
-      /* Grid of 100 token-sized squares (10x10). */
+      /* Grid: a proportional flex strip. One `.ctx-grid__cat` per visible
+         category; flex-grow equals its share of used tokens, so the bar
+         fills its container with no fake placeholders. The `messages`
+         category nests per-message sub-tiles inside its strip. */
       .ctx-grid {
         background: var(--panel);
         border: 1px solid var(--border);
@@ -906,33 +909,77 @@
         box-shadow: var(--shadow);
         display: flex;
         flex-direction: column;
+        gap: 10px;
+      }
+      .ctx-grid__strip {
+        display: flex;
+        flex-direction: row;
+        gap: 3px;
+        width: 100%;
+        min-height: 56px;
+        align-items: stretch;
+      }
+      .ctx-grid__cat {
+        flex-grow: var(--weight, 1);
+        min-width: 6px;
+        border-radius: 5px;
+        position: relative;
+        overflow: hidden;
+        transition: filter 80ms ease;
+      }
+      .ctx-grid__cat:hover { filter: brightness(1.08); }
+      .ctx-grid__cat--system_prompt { background: #1f6feb; }
+      .ctx-grid__cat--system_tools  { background: #953800; }
+      .ctx-grid__cat--skills        { background: #b35900; }
+      .ctx-grid__cat--messages {
+        background: #1aa6e8;
+        display: flex;
+        flex-direction: row;
+        gap: 2px;
+        padding: 4px;
+        min-width: 0;
+      }
+      .ctx-grid__sub {
+        flex-grow: var(--weight, 1);
+        min-width: 2px;
+        border-radius: 2px;
+        background: rgba(255, 255, 255, 0.55);
+        transition: filter 80ms ease;
+        cursor: pointer;
+      }
+      .ctx-grid__sub:hover { filter: brightness(1.15); }
+      /* Cache TTL gradient applied to sub-tiles inside the messages strip. */
+      .ctx-grid__sub--ttl-expired    { background: #d93025 !important; }
+      .ctx-grid__sub--ttl-soon       { background: #f9ab00 !important; }
+      .ctx-grid__sub--ttl-fresh      { background: #1a7f37 !important; }
+      .ctx-grid__sub--ttl-fresh-long { background: #0f766e !important; }
+
+      /* Legend swatches under the grid. */
+      .ctx-legend {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+        font-size: 11.5px;
+        color: var(--muted);
+      }
+      .ctx-legend__item {
+        display: inline-flex;
+        align-items: center;
         gap: 4px;
       }
-      .ctx-grid__row {
-        display: grid;
-        grid-template-columns: repeat(10, 1fr);
-        gap: 3px;
+      .ctx-legend__sw {
+        display: inline-block;
+        width: 10px;
+        height: 10px;
+        border-radius: 2px;
       }
-      .ctx-grid__cell {
-        aspect-ratio: 1 / 1;
-        border-radius: 3px;
-        background: var(--border-soft);
-        transition: transform 80ms ease;
-      }
-      .ctx-grid__cell--system_prompt { background: #1f6feb; }
-      .ctx-grid__cell--system_tools  { background: #953800; }
-      .ctx-grid__cell--skills        { background: #b35900; }
-      .ctx-grid__cell--messages      { background: #1aa6e8; }
-      .ctx-grid__cell--free {
-        background: transparent;
-        border: 1px dashed var(--border-soft);
-      }
-      .ctx-grid__cell:hover {
-        transform: scale(1.15);
-      }
+      .ctx-legend__sw--system_prompt { background: #1f6feb; }
+      .ctx-legend__sw--system_tools  { background: #953800; }
+      .ctx-legend__sw--skills        { background: #b35900; }
+      .ctx-legend__sw--messages      { background: #1aa6e8; }
 
-      /* Message blocks: per-message tiles, sized by hit count, colored by
-         cache TTL. */
+      /* Message blocks: square tiles, area scaled by tokens, colored by
+         cache TTL, with a kind-keyed border. */
       .ctx-msgs {
         background: var(--panel);
         border: 1px solid var(--border);
@@ -962,22 +1009,37 @@
         min-height: 40px;
       }
       .ctx-msg {
-        border-radius: 50%;
-        border: 1px solid rgba(0, 0, 0, 0.2);
+        border-radius: 4px;
         padding: 0;
         cursor: pointer;
         background: var(--border-soft);
+        position: relative;
         transition: transform 80ms ease, box-shadow 80ms ease;
       }
       .ctx-msg:hover {
-        transform: scale(1.2);
+        transform: scale(1.12);
         box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.1);
       }
-      .ctx-msg--user      { background: #1f6feb; }
-      .ctx-msg--assistant { background: #1aa6e8; }
-      .ctx-msg--tool_call { background: #21d4c1; }
+      /* Kind is encoded as a border, not a fill — TTL stays the primary
+         visual signal. */
+      .ctx-msg__border--user      { border: 1.5px solid #1f6feb; }
+      .ctx-msg__border--assistant { border: 1.5px solid #1aa6e8; }
+      .ctx-msg__border--tool_call { border: 1.5px solid #21d4c1; }
 
-      /* Cache TTL gradient. Red = expired, amber = close, green = fresh. */
+      /* Hits badge inside each tile. */
+      .ctx-msg__badge {
+        position: absolute;
+        bottom: 2px;
+        right: 3px;
+        font-size: 9px;
+        font-weight: 700;
+        color: rgba(0, 0, 0, 0.75);
+        line-height: 1;
+        pointer-events: none;
+      }
+
+      /* Cache TTL palette for message tiles. The renderer applies these
+         via `ctx-msg--ttl-{tone}` on top of the kind border. */
       .ctx-msg--ttl-expired    { background: #d93025 !important; }
       .ctx-msg--ttl-soon       { background: #f9ab00 !important; }
       .ctx-msg--ttl-fresh      { background: #1a7f37 !important; }
