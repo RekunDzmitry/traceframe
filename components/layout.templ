@@ -1,0 +1,33 @@
+package components
+
+// Layout is the page shell. It replaces the hand-written markup that used to
+// live at the top of static/index.html, which had an orphan </div> after the
+// subtitle and never closed either <section>. Browsers auto-repaired that;
+// templ will not, so the structure is balanced here.
+templ Layout(title string) {
+	<!DOCTYPE html>
+	<html lang="en">
+		<head>
+			<meta charset="utf-8"/>
+			<meta name="viewport" content="width=device-width, initial-scale=1"/>
+			<title>{ title }</title>
+			<link rel="stylesheet" href="/app.css"/>
+			<script src="/htmx.min.js" defer></script>
+		</head>
+		<body>
+			<main>
+				<header class="app-header">
+					<div>
+						<h1>Traceframe</h1>
+						<p class="subtitle">
+							Hook events from your coding agents, grouped by the
+							message that triggered them.
+						</p>
+					</div>
+					<button class="refresh" type="button" id="refresh">Refresh</button>
+				</header>
+				{ children... }
+			</main>
+		</body>
+	</html>
+}
