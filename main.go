@@ -22,14 +22,10 @@ import (
 	"time"
 )
 
-//go:embed static/index.html static/context.js static/tokenizer.js
+//go:embed static/index.html
 var staticFiles embed.FS
 
-var (
-	indexHTML   []byte
-	contextJS   []byte
-	tokenizerJS []byte
-)
+var indexHTML []byte
 
 func init() {
 	var err error
@@ -37,11 +33,6 @@ func init() {
 	if err != nil {
 		panic(err)
 	}
-	contextJS, err = staticFiles.ReadFile("static/context.js")
-	if err != nil {
-		panic(err)
-	}
-	tokenizerJS, err = staticFiles.ReadFile("static/tokenizer.js")
 }
 
 // maxReadBytes caps the size of incoming hook POST bodies.
@@ -243,8 +234,6 @@ func main() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", s.handleIndex)
 	mux.HandleFunc("/healthz", s.handleHealth)
-	mux.HandleFunc("/context.js", s.handleContextJS)
-	mux.HandleFunc("/tokenizer.js", s.handleTokenizerJS)
 	mux.HandleFunc("/api/hooks", s.handleHooksCollection)
 	mux.HandleFunc("/api/hooks/", s.handleHookByID)
 	mux.HandleFunc("/api/sessions/", s.handleSessionRoute)
@@ -378,19 +367,6 @@ func (s *server) listHooks(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"hooks": summaries})
 }
 
-
-func (s *server) handleContextJS(w http.ResponseWriter, _ *http.Request) {
-	w.Header().Set("content-type", "application/javascript; charset=utf-8")
-	w.Header().Set("cache-control", "no-cache")
-	_, _ = w.Write(contextJS)
-}
-
-func (s *server) handleTokenizerJS(w http.ResponseWriter, _ *http.Request) {
-	w.Header().Set("content-type", "application/javascript; charset=utf-8")
-	w.Header().Set("cache-control", "no-cache")
-	_, _ = w.Write(tokenizerJS)
-}
-
 func (s *server) serveHookDetail(w http.ResponseWriter, r *http.Request, eventID string) {
 	// Match either the synthetic UUID (event_id column) or the deterministic
 	// natural_id (which is what the list endpoint returns for legacy rows
@@ -454,13 +430,14 @@ func (s *server) serveSessionTimeline(w http.ResponseWriter, r *http.Request, se
 	timeline := buildTimeline(summaries)
 	writeJSON(w, http.StatusOK, timeline)
 }
+
 // serveSessionHooks returns every hook row for one session in chronological
-// order (oldest first). The Context Usage Map aggregator reads from this
-// instead of the global /api/hooks list (which is capped at 300 newest and
-// can silently omit the SessionStart/system prompt/tool definitions for
+// order (oldest first), uncapped, unlike the global /api/hooks list (which
+// keeps only the 300 newest and can silently omit the SessionStart for
 // long-running sessions). The timeline endpoint at
 // /api/sessions/{id}/timeline wraps the same query in a turn-grouped view;
-// this raw form is what the aggregator wants.
+// this is the raw form. The UI no longer calls it — it is kept as a public
+// API for scripting against a single session.
 func (s *server) serveSessionHooks(w http.ResponseWriter, r *http.Request, sessionID string) {
 	query := fmt.Sprintf(`
 		SELECT %s
