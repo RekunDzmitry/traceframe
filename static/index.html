@@ -296,6 +296,57 @@
         padding: 0;
       }
 
+      /* User-message group: one per UserPromptSubmit, wrapping every turn
+         the agent produced before the next user message. */
+      .usermsg + .usermsg {
+        border-top: 1px solid var(--border-soft);
+      }
+      .usermsg-header {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 12px 18px;
+        cursor: pointer;
+        user-select: none;
+      }
+      .usermsg-header:hover {
+        background: var(--panel-alt);
+      }
+      .usermsg-header:focus-visible {
+        outline: 2px solid var(--accent);
+        outline-offset: -2px;
+      }
+      .usermsg-chevron {
+        color: var(--muted);
+        font-size: 11px;
+        transition: transform 0.12s ease;
+      }
+      .usermsg.expanded .usermsg-chevron {
+        transform: rotate(90deg);
+      }
+      .usermsg-title {
+        flex: 1;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font-size: 14px;
+      }
+      .usermsg-meta {
+        flex-shrink: 0;
+        font-size: 12px;
+        color: var(--muted);
+        font-variant-numeric: tabular-nums;
+      }
+      .usermsg-turns {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+      }
+      .usermsg-turns > .turn:first-child {
+        padding-top: 4px;
+      }
+
       .turn {
         padding: 16px 18px 0;
       }
@@ -1299,6 +1350,7 @@
         timeline: null,
         rawPayload: new Map(), // event_id -> payload
         expanded: new Set(), // event_ids currently expanded
+        expandedGroups: new Set(), // user-message group ids currently expanded
         filters: {
           failures: false,
           kind: "",
@@ -1868,6 +1920,156 @@
         return out;
       }
 
+      /* Agents fire UserPromptSubmit for machine-injected content too —
+         background-agent reports, system reminders, the output of `!` shell
+         commands. Nobody typed those, so they must not head a group; they
+         belong to the message whose work they are part of. Detected by the
+         wrapper tag the host prepends. */
+      const INJECTED_PROMPT_PREFIXES = [
+        "<task-notification>",
+        "<system-reminder>",
+        "<local-command-caveat>",
+        "<command-name>",
+        "<command-message>",
+        "<bash-input>",
+        "<bash-stdout>",
+        "<bash-stderr>",
+      ];
+
+      /* How long after a prompt a longer re-submission still counts as the
+         same message being completed rather than a new one. */
+      const SUPERSEDED_PROMPT_WINDOW_MS = 120000;
+
+      function isInjectedPrompt(prompt) {
+        if (!prompt) return false;
+        const text = (prompt.content || "").trimStart();
+        return INJECTED_PROMPT_PREFIXES.some((tag) => text.startsWith(tag));
+      }
+
+      /**
+       * True when `a` is a fragment that `b` superseded: the user submitted,
+       * kept typing, and the host re-sent the whole message. The earlier row
+       * is then a strict prefix of the later one, arrived moments before it,
+       * and never got far enough to run a tool.
+       */
+      function supersededBy(a, b) {
+        if (!a.prompt || !b.prompt || a.toolCount !== 0) return false;
+        const at = a.prompt.content || "";
+        const bt = b.prompt.content || "";
+        if (!at || at.length >= bt.length || !bt.startsWith(at)) return false;
+        const gap = new Date(b.prompt.event_time) - new Date(a.prompt.event_time);
+        return gap >= 0 && gap <= SUPERSEDED_PROMPT_WINDOW_MS;
+      }
+
+      /**
+       * Group the server's turns by the user message that started them.
+       *
+       * The server flushes a turn on every Stop (main.go), so one prompt that
+       * spawns subagents or several stops yields several turns. A turn carries
+       * a `prompt` exactly when a UserPromptSubmit opened it, which makes it
+       * the group boundary. Turns that arrive before any prompt (the server
+       * synthesises a prompt-less turn for those) collect into one leading
+       * group.
+       *
+       * Two kinds of UserPromptSubmit are not new messages and get absorbed
+       * into the group before them: injected prompts (see above) and prompts
+       * superseded by a longer re-submission.
+       *
+       * Group ids must stay stable across the 5s refresh, so they are keyed on
+       * the prompt's event_id.
+       */
+      function groupTurnsByUserMessage(turns) {
+        const groups = [];
+        let current = null;
+        for (const t of turns || []) {
+          const startsGroup = Boolean(t.prompt) && !isInjectedPrompt(t.prompt);
+          if (startsGroup || current === null) {
+            current = {
+              id: startsGroup ? "ug:" + t.prompt.event_id : "ug:orphan",
+              prompt: startsGroup ? t.prompt : null,
+              turns: [],
+              toolCount: 0,
+            };
+            groups.push(current);
+          }
+          current.turns.push(t);
+          current.toolCount += (t.tools || []).length;
+        }
+        // Fold superseded fragments forward into the completed message. Walk
+        // backwards so a chain of edits collapses into the final submission.
+        for (let i = groups.length - 2; i >= 0; i--) {
+          if (!supersededBy(groups[i], groups[i + 1])) continue;
+          groups[i + 1].turns = groups[i].turns.concat(groups[i + 1].turns);
+          groups[i + 1].toolCount += groups[i].toolCount;
+          groups.splice(i, 1);
+        }
+        return groups;
+      }
+
+      /** True when any timeline filter is narrowing the view. */
+      function filtersActive() {
+        const f = state.filters;
+        return Boolean(f.failures || f.kind || f.tool || f.minDuration > 0 || f.file);
+      }
+
+      function usermsgHeader(group, isOpen) {
+        const header = document.createElement("div");
+        header.className = "usermsg-header";
+        header.setAttribute("role", "button");
+        header.setAttribute("tabindex", "0");
+        header.setAttribute("aria-expanded", isOpen ? "true" : "false");
+
+        const chevron = document.createElement("span");
+        chevron.className = "usermsg-chevron";
+        chevron.textContent = "▶";
+
+        const tag = document.createElement("span");
+        tag.className = "tool-tag";
+        tag.textContent = "You";
+
+        const title = document.createElement("span");
+        title.className = "usermsg-title";
+        title.textContent = group.prompt
+          ? truncate(firstLine(group.prompt.content), 120) || "(empty prompt)"
+          : "Before first prompt";
+
+        const meta = document.createElement("span");
+        meta.className = "usermsg-meta";
+        const turnCount = group.turns.length;
+        meta.textContent =
+          `${turnCount} turn${turnCount === 1 ? "" : "s"} · ` +
+          `${group.toolCount} tool${group.toolCount === 1 ? "" : "s"} · ` +
+          formatTime(group.turns[0].started_at);
+
+        header.append(chevron, tag, title, meta);
+        header.addEventListener("click", () => toggleGroup(group.id));
+        header.addEventListener("keydown", (e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            toggleGroup(group.id);
+          }
+        });
+        return header;
+      }
+
+      /** Collapse/expand one user-message group in place, no re-render, so the
+       *  5s refresh cannot steal the user's scroll position. */
+      function toggleGroup(groupId) {
+        const groupEl = timelineEl.querySelector(
+          `.usermsg[data-group-id="${cssEscape(groupId)}"]`,
+        );
+        if (!groupEl) return;
+        const turnsEl = groupEl.querySelector(".usermsg-turns");
+        const header = groupEl.querySelector(".usermsg-header");
+        if (!turnsEl || !header) return;
+        const willExpand = turnsEl.hidden;
+        if (willExpand) state.expandedGroups.add(groupId);
+        else state.expandedGroups.delete(groupId);
+        turnsEl.hidden = !willExpand;
+        groupEl.classList.toggle("expanded", willExpand);
+        header.setAttribute("aria-expanded", willExpand ? "true" : "false");
+      }
+
       function renderTurns(tl, filtered) {
         timelineEl.textContent = "";
         const filterIds = new Set(filtered.map((e) => e.event_id));
@@ -1878,58 +2080,94 @@
           return;
         }
         emptyEl.hidden = true;
-        for (const t of turns) {
-          const turnEl = document.createElement("li");
-          turnEl.className = "turn";
-          const header = document.createElement("div");
-          header.className = "turn-header";
-          header.innerHTML = `<span class="turn-time">${formatTime(t.started_at)}</span><span>·</span><span>${(t.tools || []).length} tool${(t.tools || []).length === 1 ? "" : "s"}</span>`;
-          turnEl.appendChild(header);
 
-          if (t.prompt) {
-            const promptEl = document.createElement("div");
-            promptEl.className = "turn-prompt";
-            const label = document.createElement("div");
-            label.className = "turn-prompt-label";
-            label.textContent = "You";
-            const body = document.createElement("div");
-            body.className = "markdown";
-            body.innerHTML = renderMarkdown(t.prompt.content || "");
-            promptEl.append(label, body);
-            turnEl.appendChild(promptEl);
-          }
+        // Rows that fail a filter are only dimmed, which is invisible inside a
+        // collapsed group. So while a filter is active, groups holding a match
+        // are forced open. This is a render-time override on top of
+        // state.expandedGroups, never a write to it, so clearing the filter
+        // restores exactly the groups the user opened by hand.
+        const filtering = filtersActive();
 
-          const toolsEl = document.createElement("ul");
-          toolsEl.className = "turn-tools";
-          for (const tool of t.tools || []) {
-            toolsEl.appendChild(rowForEvent(tool, filterIds.has(tool.event_id)));
-            const details = detailsForEvent(tool);
-            details.hidden = !state.expanded.has(tool.event_id);
-            toolsEl.appendChild(details);
-          }
-          turnEl.appendChild(toolsEl);
+        for (const group of groupTurnsByUserMessage(turns)) {
+          const groupEl = document.createElement("li");
+          groupEl.className = "usermsg";
+          groupEl.dataset.groupId = group.id;
 
-          if (t.response) {
-            const respEl = document.createElement("div");
-            respEl.className = "turn-response";
-            const label = document.createElement("div");
-            label.className = "turn-response-label";
-            label.textContent = "Assistant";
-            const body = document.createElement("div");
-            body.className = "markdown";
-            body.innerHTML = renderMarkdown(
-              t.response.content || "_(response recorded; click View raw for the payload)_",
+          const hasMatch =
+            filtering &&
+            group.turns.some((t) =>
+              (t.tools || []).some((tool) => filterIds.has(tool.event_id)),
             );
-            respEl.append(label, body);
-            turnEl.appendChild(respEl);
-          } else {
-            const pending = document.createElement("div");
-            pending.className = "turn-response";
-            pending.innerHTML = `<div class="turn-response-label">Assistant</div><div class="status">No response yet.</div>`;
-            turnEl.appendChild(pending);
+          const isOpen = state.expandedGroups.has(group.id) || hasMatch;
+          if (isOpen) groupEl.classList.add("expanded");
+
+          groupEl.appendChild(usermsgHeader(group, isOpen));
+
+          const turnsEl = document.createElement("ul");
+          turnsEl.className = "usermsg-turns";
+          turnsEl.hidden = !isOpen;
+          for (const t of group.turns) {
+            turnsEl.appendChild(turnElement(t, filterIds));
           }
-          timelineEl.appendChild(turnEl);
+          groupEl.appendChild(turnsEl);
+
+          timelineEl.appendChild(groupEl);
         }
+      }
+
+      /** Render one server turn. Unchanged from before the user-message level
+       *  was introduced; it is now nested inside a .usermsg group. */
+      function turnElement(t, filterIds) {
+        const turnEl = document.createElement("li");
+        turnEl.className = "turn";
+        const header = document.createElement("div");
+        header.className = "turn-header";
+        header.innerHTML = `<span class="turn-time">${formatTime(t.started_at)}</span><span>·</span><span>${(t.tools || []).length} tool${(t.tools || []).length === 1 ? "" : "s"}</span>`;
+        turnEl.appendChild(header);
+
+        if (t.prompt) {
+          const promptEl = document.createElement("div");
+          promptEl.className = "turn-prompt";
+          const label = document.createElement("div");
+          label.className = "turn-prompt-label";
+          label.textContent = "You";
+          const body = document.createElement("div");
+          body.className = "markdown";
+          body.innerHTML = renderMarkdown(t.prompt.content || "");
+          promptEl.append(label, body);
+          turnEl.appendChild(promptEl);
+        }
+
+        const toolsEl = document.createElement("ul");
+        toolsEl.className = "turn-tools";
+        for (const tool of t.tools || []) {
+          toolsEl.appendChild(rowForEvent(tool, filterIds.has(tool.event_id)));
+          const details = detailsForEvent(tool);
+          details.hidden = !state.expanded.has(tool.event_id);
+          toolsEl.appendChild(details);
+        }
+        turnEl.appendChild(toolsEl);
+
+        if (t.response) {
+          const respEl = document.createElement("div");
+          respEl.className = "turn-response";
+          const label = document.createElement("div");
+          label.className = "turn-response-label";
+          label.textContent = "Assistant";
+          const body = document.createElement("div");
+          body.className = "markdown";
+          body.innerHTML = renderMarkdown(
+            t.response.content || "_(response recorded; click View raw for the payload)_",
+          );
+          respEl.append(label, body);
+          turnEl.appendChild(respEl);
+        } else {
+          const pending = document.createElement("div");
+          pending.className = "turn-response";
+          pending.innerHTML = `<div class="turn-response-label">Assistant</div><div class="status">No response yet.</div>`;
+          turnEl.appendChild(pending);
+        }
+        return turnEl;
       }
 
       // ---------- Render: flat list (all sessions) ----------
