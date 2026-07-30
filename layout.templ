@@ -1,0 +1,87 @@
+package main
+
+// Layout is the page shell. It replaces the hand-written markup at the top of
+// static/index.html, which had an orphan </div> after the subtitle and never
+// closed either <section>. Browsers auto-repaired that; templ will not.
+templ Layout(title string) {
+	<!DOCTYPE html>
+	<html lang="en">
+		<head>
+			<meta charset="utf-8"/>
+			<meta name="viewport" content="width=device-width, initial-scale=1"/>
+			<title>{ title }</title>
+			<link rel="stylesheet" href="/app.css"/>
+			<script src="/htmx.min.js" defer></script>
+		</head>
+		<body>
+			<main>
+				<header class="app-header">
+					<div>
+						<h1>Traceframe</h1>
+						<p class="subtitle">
+							Hook events from your coding agents, grouped by the
+							message that triggered them.
+						</p>
+					</div>
+					<button class="refresh" type="button" hx-get="/ui/main" hx-target="#app" hx-swap="innerHTML">
+						Refresh
+					</button>
+				</header>
+				<div id="app">
+					{ children... }
+				</div>
+			</main>
+			<div class="scrim" id="scrim" hx-on:click="document.getElementById('drawer').classList.remove('open'); this.classList.remove('open')"></div>
+			<aside class="drawer" id="drawer" aria-label="Raw payload">
+				<div id="drawer-content"></div>
+			</aside>
+		</body>
+	</html>
+}
+
+// Page is the whole two-panel body: session sidebar plus the events panel.
+// It is both the initial render and the target of the refresh button, so the
+// same component serves a full page load and an htmx swap.
+templ Page(rc renderContext, sessions []sidebarSession, totals sidebarSession, content templ.Component) {
+	<section class="layout">
+		<aside class="panel sessions" aria-label="Sessions">
+			<div class="section-title">Sessions</div>
+			<div
+				class="session-list"
+				id="sessions"
+				hx-get={ "/ui/sessions?session=" + rc.SelectedSession }
+				hx-trigger="every 5s"
+				hx-swap="innerHTML"
+			>
+				@Sidebar(rc, sessions, totals)
+			</div>
+		</aside>
+		<section class="panel events" aria-label="Hook events">
+			@content
+		</section>
+	</section>
+}
+
+templ Sidebar(rc renderContext, sessions []sidebarSession, totals sidebarSession) {
+	@SessionButton(rc, totals)
+	for _, session := range sessions {
+		@SessionButton(rc, session)
+	}
+}
+
+templ SessionButton(rc renderContext, session sidebarSession) {
+	<button
+		type="button"
+		class={ "session-button", templ.KV("active", rc.SelectedSession == session.ID) }
+		hx-get={ "/ui/main?session=" + session.ID }
+		hx-target="#app"
+		hx-swap="innerHTML"
+		hx-push-url={ "/?session=" + session.ID }
+	>
+		<div>
+			<div class="session-name">{ session.Name }</div>
+			<div class="session-meta">{ session.Meta() }</div>
+		</div>
+		<div class="session-count">{ session.Count }</div>
+	</button>
+}

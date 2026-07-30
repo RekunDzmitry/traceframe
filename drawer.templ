@@ -1,0 +1,95 @@
+package main
+
+// DrawerContent is the raw-payload panel. Only its inner content is swapped --
+// the <aside class="drawer"> itself must persist across swaps or its
+// translateX slide-in animation never plays.
+templ DrawerContent(eventID, eventName, sessionID, term string, payload jsonNode) {
+	<div class="drawer-header">
+		<div>
+			<h2 class="drawer-title">Raw payload</h2>
+			<div class="drawer-sub">{ eventName } &#183; { shortID(sessionID) }</div>
+		</div>
+		<button
+			class="btn"
+			type="button"
+			hx-on:click="document.getElementById('drawer').classList.remove('open'); document.getElementById('scrim').classList.remove('open')"
+		>
+			Close
+		</button>
+	</div>
+	<div class="drawer-toolbar">
+		<input
+			type="search"
+			name="q"
+			placeholder="Search keys or values&#8230;"
+			autocomplete="off"
+			value={ term }
+			hx-get={ "/ui/raw?id=" + eventID }
+			hx-target="#drawer-content"
+			hx-swap="innerHTML"
+			hx-trigger="input changed delay:200ms"
+		/>
+		<button
+			class="btn primary"
+			type="button"
+			data-copy-target={ "/api/hooks/" + eventID }
+		>
+			Copy JSON
+		</button>
+	</div>
+	<div class="drawer-body">
+		@JSONTree(payload, "$", term)
+	</div>
+}
+
+// JSONTree renders the decoded payload. Collapsing is a <details> element now,
+// which the JS did with a click handler and a CSS class -- it needs no state on
+// either side.
+templ JSONTree(node jsonNode, path, term string) {
+	<div class="json-node">
+		switch node.Kind {
+			case jsonObject, jsonArray:
+				<details open>
+					<summary class="json-row">
+						<span class="json-key">{ path } </span>
+						<span class="json-meta">{ node.Label() }</span>
+					</summary>
+					<div class="json-children">
+						if len(node.Children) == 0 {
+							<div class="json-meta">(empty)</div>
+						} else {
+							for i, child := range node.Children {
+								@JSONTree(child, node.ChildPath(path, i), term)
+							}
+						}
+					</div>
+				</details>
+			default:
+				<div class="json-row">
+					<span class="json-key">{ path } </span>
+					<span class={ node.Class }>
+						for _, seg := range highlightSegments(node.Display, term) {
+							if seg.Match {
+								<mark>{ seg.Text }</mark>
+							} else {
+								{ seg.Text }
+							}
+						}
+					</span>
+				</div>
+		}
+	</div>
+}
+
+templ DrawerEmpty() {
+	<div class="drawer-header">
+		<div>
+			<h2 class="drawer-title">Raw payload</h2>
+		</div>
+	</div>
+	<div class="drawer-body">
+		<div class="drawer-empty">
+			Pick a row and click <strong>View raw</strong> to inspect the full payload.
+		</div>
+	</div>
+}

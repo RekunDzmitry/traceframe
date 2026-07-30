@@ -868,3 +868,73 @@ button {
     width: 100vw;
   }
 }
+
+/* ---------- Server-rendered additions ----------
+   Classes introduced when rendering moved from JS into templ. Most replace
+   inline style strings the JS assigned imperatively. */
+
+/* The row and its details are now wrapped in one <li> so htmx can swap the
+   pair together; the row itself is a real <button>. */
+.row-wrap {
+  display: block;
+}
+.row-wrap > .row {
+  width: 100%;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+}
+.row-wrap > .row-details {
+  display: block;
+}
+
+/* Replaces the 20-property inline style the JS set on the raw prompt/response
+   <pre>. */
+.text-block {
+  background: var(--code-bg);
+  padding: 8px 10px;
+  border-radius: 6px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12.5px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  max-height: 320px;
+  overflow: auto;
+  margin: 0;
+}
+
+/* Replaces the ad-hoc margin styles on the Command / stdout / stderr / hunk
+   labels. */
+.block-label {
+  margin: 6px 0 4px;
+}
+
+.muted {
+  color: var(--muted);
+}
+.session-stats .danger {
+  color: var(--error);
+}
+
+/* The JSON tree collapses with <details>/<summary> now instead of a click
+   handler toggling a class, so the disclosure needs no JS at all. */
+.json-node > details > summary {
+  list-style: none;
+  cursor: pointer;
+}
+.json-node > details > summary::-webkit-details-marker {
+  display: none;
+}
+.json-node > details > summary::before {
+  content: "▸";
+  display: inline-block;
+  width: 12px;
+  text-align: center;
+  color: var(--muted);
+  font-size: 10px;
+}
+.json-node > details[open] > summary::before {
+  content: "▾";
+}

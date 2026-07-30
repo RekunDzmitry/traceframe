@@ -12,6 +12,128 @@ import (
 // pure: no I/O, no globals, no request scope -- which is what makes it
 // testable, unlike the JS it replaces.
 
+// ---------- Render context ----------
+
+// renderContext carries the per-request state every component needs: which
+// session is selected, what is filtered, which disclosures are open, and the
+// viewer's timezone. It replaces the module-level `state` object the JS kept.
+type renderContext struct {
+	SelectedSession string
+	Filters         timelineFilters
+	Open            map[string]bool
+	Loc             *time.Location
+}
+
+func (c renderContext) IsOpen(id string) bool { return c.Open[id] }
+
+// FormatTime renders a stored RFC3339 timestamp in the viewer's zone. The JS
+// used Intl with an undefined locale, i.e. the browser's; the zone now arrives
+// from a cookie instead, with UTC as the fallback until it is set.
+func (c renderContext) FormatTime(value string) string {
+	if value == "" {
+		return ""
+	}
+	at, err := time.Parse(time.RFC3339Nano, value)
+	if err != nil {
+		return value
+	}
+	loc := c.Loc
+	if loc == nil {
+		loc = time.UTC
+	}
+	return at.In(loc).Format("Jan 2, 03:04:05 PM")
+}
+
+// formatDuration renders a millisecond span for the session stats bar.
+func formatDuration(ms int64) string {
+	if ms <= 0 {
+		return "—"
+	}
+	if ms < 1000 {
+		return fmt.Sprintf("%dms", ms)
+	}
+	s := float64(ms) / 1000
+	if s < 60 {
+		return fmt.Sprintf("%.1fs", s)
+	}
+	return fmt.Sprintf("%dm %ds", int(s)/60, int(s)%60)
+}
+
+// ---------- Sidebar ----------
+
+// sidebarSession is one row of the session list, aggregated from the flat hook
+// feed rather than the per-session timeline.
+type sidebarSession struct {
+	ID        string
+	Name      string
+	Count     int
+	Tools     int
+	Failures  int
+	LastEvent string
+}
+
+// Meta is the "12 events · 3 tools · 1 failure" line.
+func (s sidebarSession) Meta() string {
+	parts := []string{plural(s.Count, "event")}
+	if s.Tools > 0 {
+		parts = append(parts, plural(s.Tools, "tool"))
+	}
+	if s.Failures > 0 {
+		parts = append(parts, plural(s.Failures, "failure"))
+	}
+	return strings.Join(parts, " · ")
+}
+
+func plural(n int, word string) string {
+	if n == 1 {
+		return fmt.Sprintf("%d %s", n, word)
+	}
+	return fmt.Sprintf("%d %ss", n, word)
+}
+
+// buildSessions aggregates the flat hook list into sidebar rows, newest first.
+func buildSessions(hooks []eventSummary) []sidebarSession {
+	order := []string{}
+	byID := map[string]*sidebarSession{}
+	for _, h := range hooks {
+		id := h.SessionID
+		if id == "" {
+			id = "unknown"
+		}
+		existing, ok := byID[id]
+		if !ok {
+			name := h.SessionName
+			if name == "" {
+				name = id
+				if id == "unknown" {
+					name = "Unknown session"
+				}
+			}
+			existing = &sidebarSession{ID: id, Name: name, LastEvent: h.EventTime}
+			byID[id] = existing
+			order = append(order, id)
+		}
+		existing.Count++
+		if h.Kind == kindTool {
+			existing.Tools++
+		}
+		if h.Status == statusError {
+			existing.Failures++
+		}
+		if h.EventTime > existing.LastEvent {
+			existing.LastEvent = h.EventTime
+		}
+	}
+	sessions := make([]sidebarSession, 0, len(order))
+	for _, id := range order {
+		sessions = append(sessions, *byID[id])
+	}
+	sort.Slice(sessions, func(i, j int) bool {
+		return sessions[i].LastEvent > sessions[j].LastEvent
+	})
+	return sessions
+}
+
 // ---------- User-message grouping ----------
 
 // injectedPromptPrefixes marks UserPromptSubmit events that nobody typed.
