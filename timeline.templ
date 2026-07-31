@@ -1,6 +1,9 @@
 package main
 
-import "fmt"
+import (
+	"fmt"
+	"net/url"
+)
 
 // EventsPanel is the header + filters + timeline for one session, or for the
 // combined "all sessions" feed. It polls itself every 5s; because expansion
@@ -16,7 +19,7 @@ templ EventsPanel(rc renderContext, title string, session *sessionSummary, tools
 					<button
 						class="delete-session"
 						type="button"
-						hx-delete={ "/api/sessions/" + session.ID }
+						hx-delete={ "/ui/sessions/delete?session=" + url.QueryEscape(session.ID) }
 						hx-target="#app"
 						hx-swap="innerHTML"
 						data-confirm={ fmt.Sprintf("Delete session %q and its %d events? This cannot be undone.", session.Name, session.EventCount) }

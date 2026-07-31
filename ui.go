@@ -280,6 +280,8 @@ func (s *server) handleUIRoute(w http.ResponseWriter, r *http.Request) {
 		s.handleUIToggle(w, r, toggleGroup)
 	case "rows/toggle":
 		s.handleUIToggle(w, r, toggleRow)
+	case "sessions/delete":
+		s.handleUIDeleteSession(w, r)
 	case "raw":
 		s.handleUIRaw(w, r)
 	default:
@@ -463,6 +465,42 @@ func (s *server) findEvent(r *http.Request, rc renderContext, eventID string) (*
 		}
 	}
 	return nil, nil
+}
+
+// handleUIDeleteSession is the UI's own delete, separate from the JSON
+// DELETE /api/sessions/{id} that scripts use. The button targets #app, so the
+// reply has to be the rebuilt page: pointing it at the API endpoint would swap
+// `{"ok":true}` into the app shell and leave the UI dead until a reload.
+//
+// After the delete the selected session no longer exists, so the page is
+// rebuilt on the combined feed and the address bar is corrected to match --
+// otherwise a reload would ask for a session that was just removed.
+func (s *server) handleUIDeleteSession(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodDelete {
+		w.Header().Set("allow", http.MethodDelete)
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	sessionID := strings.TrimSpace(r.URL.Query().Get("session"))
+	if sessionID == "" || sessionID == allSessionsID {
+		http.NotFound(w, r)
+		return
+	}
+	if err := s.deleteSessionRows(r.Context(), sessionID); err != nil {
+		renderError(w, r, err)
+		return
+	}
+
+	rc := parseRenderContext(r)
+	rc.SelectedSession = allSessionsID
+	rc.CursorSet = false
+	page, err := s.buildPage(r, rc)
+	if err != nil {
+		renderError(w, r, err)
+		return
+	}
+	w.Header().Set("HX-Push-Url", canonicalPageURL(rc, -1))
+	renderFragment(w, r, page)
 }
 
 func (s *server) handleUIRaw(w http.ResponseWriter, r *http.Request) {

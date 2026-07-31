@@ -516,14 +516,21 @@ func (s *server) serveSessionHooks(w http.ResponseWriter, r *http.Request, sessi
 	writeJSON(w, http.StatusOK, map[string]any{"hooks": summaries, "session_id": sessionID})
 }
 
-func (s *server) deleteSession(w http.ResponseWriter, r *http.Request, sessionID string) {
+// deleteSessionRows removes every row belonging to a session. It is shared
+// with the UI's delete endpoint, which runs the same mutation but answers with
+// HTML rather than JSON.
+func (s *server) deleteSessionRows(ctx context.Context, sessionID string) error {
 	query := `
 		ALTER TABLE claude_hooks
 		DELETE WHERE session_id = {session_id:String}
 		SETTINGS mutations_sync = 1
 	`
 	params := url.Values{"param_session_id": []string{sessionID}}
-	if err := s.queryWithParams(r.Context(), query, params); err != nil {
+	return s.queryWithParams(ctx, query, params)
+}
+
+func (s *server) deleteSession(w http.ResponseWriter, r *http.Request, sessionID string) {
+	if err := s.deleteSessionRows(r.Context(), sessionID); err != nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "delete failed", "detail": err.Error()})
 		return
 	}

@@ -1,10 +1,15 @@
 package main
 
 import (
+	"bytes"
+	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/a-h/templ"
 )
 
 func TestParseRenderContextDefaultsToAllSessions(t *testing.T) {
@@ -137,5 +142,46 @@ func TestFlattenTimelineIncludesNotes(t *testing.T) {
 	}
 	if !seenNote {
 		t.Error("notes dropped from the row lookup")
+	}
+}
+
+// The delete button targets #app, so its endpoint must answer with the rebuilt
+// page. Pointing it at the JSON API would swap `{"ok":true}` into the app
+// shell and leave the UI dead until a reload.
+func TestDeleteButtonTargetsTheUIEndpoint(t *testing.T) {
+	session := sessionSummary{ID: "sess a/b", Name: "demo", EventCount: 3}
+	var buf bytes.Buffer
+	body := templ.NopComponent
+	if err := EventsPanel(renderContext{SelectedSession: session.ID}, "demo", &session, nil, body).Render(context.Background(), &buf); err != nil {
+		t.Fatal(err)
+	}
+	html := buf.String()
+	if strings.Contains(html, `hx-delete="/api/`) {
+		t.Error("delete button points at the JSON API; its response would be swapped into #app")
+	}
+	if !strings.Contains(html, "/ui/sessions/delete?session=sess+a%2Fb") {
+		t.Errorf("delete button target missing or unescaped:\n%s", html)
+	}
+}
+
+func TestUIDeleteRejectsNonDelete(t *testing.T) {
+	s := &server{}
+	for _, method := range []string{http.MethodGet, http.MethodPost} {
+		w := httptest.NewRecorder()
+		s.handleUIDeleteSession(w, httptest.NewRequest(method, "/ui/sessions/delete?session=x", nil))
+		if w.Code != http.StatusMethodNotAllowed {
+			t.Errorf("%s -> %d, want 405", method, w.Code)
+		}
+	}
+	// "all" is the sidebar's pseudo-session, not a row set to drop.
+	w := httptest.NewRecorder()
+	s.handleUIDeleteSession(w, httptest.NewRequest(http.MethodDelete, "/ui/sessions/delete?session=all", nil))
+	if w.Code != http.StatusNotFound {
+		t.Errorf("deleting %q -> %d, want 404", allSessionsID, w.Code)
+	}
+	w = httptest.NewRecorder()
+	s.handleUIDeleteSession(w, httptest.NewRequest(http.MethodDelete, "/ui/sessions/delete", nil))
+	if w.Code != http.StatusNotFound {
+		t.Errorf("missing session -> %d, want 404", w.Code)
 	}
 }
