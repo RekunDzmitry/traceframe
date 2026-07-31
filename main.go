@@ -24,12 +24,12 @@ import (
 	// tzdata database (~450KB) lets time.LoadLocation resolve whatever IANA
 	// zone the browser reports, without an apk package in the Dockerfile.
 	_ "time/tzdata"
+
+	"github.com/a-h/templ"
 )
 
-//go:embed static/index.html static/app.css static/htmx.min.js
+//go:embed static/app.css static/htmx.min.js
 var staticFiles embed.FS
-
-var indexHTML []byte
 
 // staticAsset is an embedded file served with a content type and a strong
 // ETag, so the browser re-fetches app.css and htmx only when the binary
@@ -43,11 +43,6 @@ type staticAsset struct {
 var staticAssets = map[string]*staticAsset{}
 
 func init() {
-	var err error
-	indexHTML, err = staticFiles.ReadFile("static/index.html")
-	if err != nil {
-		panic(err)
-	}
 	for route, spec := range map[string]struct{ path, contentType string }{
 		"/app.css":     {"static/app.css", "text/css; charset=utf-8"},
 		"/htmx.min.js": {"static/htmx.min.js", "application/javascript; charset=utf-8"},
@@ -269,6 +264,7 @@ func main() {
 	mux.HandleFunc("/api/hooks", s.handleHooksCollection)
 	mux.HandleFunc("/api/hooks/", s.handleHookByID)
 	mux.HandleFunc("/api/sessions/", s.handleSessionRoute)
+	mux.HandleFunc("/ui/", s.handleUIRoute)
 
 	addr := ":" + env("PORT", "4000")
 	log.Printf("listening on %s", addr)
@@ -286,8 +282,17 @@ func (s *server) handleIndex(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
+	rc := parseRenderContext(r)
+	page, err := s.buildPage(r, rc)
+	if err != nil {
+		// A full page load has no fragment to swap into, so the shell
+		// still renders and carries the error inside it.
+		page = ErrorBlock(err.Error())
+	}
 	w.Header().Set("content-type", "text/html; charset=utf-8")
-	_, _ = w.Write(indexHTML)
+	if err := Layout("Traceframe").Render(templ.WithChildren(r.Context(), page), w); err != nil {
+		log.Printf("render index: %v", err)
+	}
 }
 
 func (s *server) handleStaticAsset(w http.ResponseWriter, r *http.Request) {

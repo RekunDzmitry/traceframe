@@ -35,8 +35,54 @@ templ Layout(title string) {
 			<aside class="drawer" id="drawer" aria-label="Raw payload">
 				<div id="drawer-content"></div>
 			</aside>
+			@shell()
 		</body>
 	</html>
+}
+
+// shell is the only script in the app. Everything the old static/index.html
+// did in the browser is now rendered on the server; what remains are the three
+// things a server genuinely cannot do for itself.
+templ shell() {
+	<script>
+		// 1. The server formats timestamps, so it needs the viewer's zone.
+		// It arrives as a cookie; the first load reloads once to pick it
+		// up, and thereafter this is a no-op.
+		(function () {
+			const zone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+			if (!zone) return;
+			const current = document.cookie.split("; ").find((c) => c.startsWith("tf_tz="));
+			if (current === "tf_tz=" + encodeURIComponent(zone)) return;
+			document.cookie = "tf_tz=" + encodeURIComponent(zone) + "; path=/; max-age=31536000; samesite=lax";
+			window.location.reload();
+		})();
+
+		// 2. Confirm destructive requests. htmx fires this for any element
+		// carrying data-confirm, which keeps the prompt text in the markup
+		// next to the button that needs it.
+		document.body.addEventListener("htmx:confirm", function (e) {
+			const message = e.detail.elt.getAttribute("data-confirm");
+			if (!message) return;
+			e.preventDefault();
+			if (window.confirm(message)) e.detail.issueRequest(true);
+		});
+
+		// 3. Copy the raw payload. The drawer renders a JSON tree, not the
+		// source text, so the button re-fetches the API representation.
+		document.body.addEventListener("click", async function (e) {
+			const button = e.target.closest("[data-copy-target]");
+			if (!button) return;
+			const label = button.textContent;
+			try {
+				const res = await fetch(button.getAttribute("data-copy-target"));
+				await navigator.clipboard.writeText(JSON.stringify(await res.json(), null, 2));
+				button.textContent = "Copied";
+			} catch {
+				button.textContent = "Copy failed";
+			}
+			setTimeout(() => { button.textContent = label; }, 1500);
+		});
+	</script>
 }
 
 // Page is the whole two-panel body: session sidebar plus the events panel.

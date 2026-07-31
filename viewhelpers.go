@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"sort"
 	"strconv"
 	"strings"
@@ -16,6 +17,33 @@ func boolAttr(b bool) string {
 		return "true"
 	}
 	return "false"
+}
+
+// itoa exists because templ renders numbers in text but not in attribute
+// values, and the replayer needs the cursor in both places.
+func itoa(n int) string { return strconv.Itoa(n) }
+
+// formatPct renders a share of the context window. Anything under a tenth of a
+// percent shows as "0.0%" rather than rounding up to a number that overstates
+// a category the user cannot see.
+func formatPct(v float64) string {
+	return fmt.Sprintf("%.1f%%", v)
+}
+
+// ---------- Replayer links ----------
+
+// replayURL is the endpoint the scrubber posts to. It carries no step of its
+// own -- the range input supplies one from its own value.
+func replayURL(ctx renderContext) string {
+	return "/ui/timeline?session=" + url.QueryEscape(ctx.SelectedSession)
+}
+
+// replayStepURL pins a specific step, for the four transport buttons.
+func replayStepURL(ctx renderContext, step int) string {
+	if step < 0 {
+		step = 0
+	}
+	return replayURL(ctx) + "&step=" + itoa(step)
 }
 
 // ---------- Groups ----------

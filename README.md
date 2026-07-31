@@ -63,11 +63,48 @@ While a filter is active, groups holding a match are forced open.
    permission mode and effort chips.
 3. **Raw JSON drawer** — full original payload, searchable, copy-to-clipboard.
 
-Tool rows show a context-window bar sourced from each hook's
-`transcript_path`. For Codex the `token_count` snapshots are read directly;
-for Claude, usage is read from the assistant messages that issued the tool
-call. Docker Compose mounts both `~/.codex/sessions` and
-`~/.claude/projects` read-only for this purpose. Set
+### History replayer
+
+The single-session view opens with a replayer banner above the timeline:
+`«` `‹` `›` `»` plus a scrubber. One step is one row — a prompt, a tool call,
+or an assistant reply — so at step 0 the session is empty and at the end it is
+the whole timeline. The position lives in the `step` query parameter, which
+makes a replay position shareable and survives a reload; the sidebar's
+five-second poll does not disturb it. With a filter active the replayer counts
+only the rows that survive it, and changing a filter returns you to the end of
+the (new) row set rather than holding a position that no longer means the same
+thing. The "All sessions" view has no replayer:
+stepping through interleaved sessions has no meaning, so it stays a plain
+list, and clicking a session opens the replayable single-session view.
+
+### Estimated usage by category
+
+Docked in the replayer banner is the context breakdown — System prompt,
+System tools, Custom agents, Memory files, Skills, Messages, Free space — and
+it is recomputed at every step, so scrubbing shows the context filling up over
+the session rather than only its final state.
+
+The window and the totals come from real context snapshots where the
+transcript has them (see below); the per-category split is a character
+estimate (~4 chars per token) because there is no tokenizer in the binary.
+Estimated rows are marked `~`. Categories with nothing behind them say so
+rather than printing a confident `0` — most providers do not report their
+system prompt through a hook, for instance.
+
+Custom agents and memory files are not reported by any hook: they are loaded
+before the first event fires, so traceframe sizes them by reading
+`.claude/agents/*.md` and `CLAUDE.md` / `MEMORY.md` off disk. Those reads are
+confined to `TRACEFRAME_PROJECT_ROOT` (default `$HOME`) and resolved through
+`EvalSymlinks`, the same containment the transcript reader uses. Under Docker
+these two rows read "none found" until you mount the directories holding those
+files — see the commented examples in `docker-compose.yml`.
+
+### Context snapshots
+
+Context totals are sourced from each hook's `transcript_path`. For Codex the
+`token_count` snapshots are read directly; for Claude, usage is read from the
+assistant messages that issued the tool call. Docker Compose mounts both
+`~/.codex/sessions` and `~/.claude/projects` read-only for this purpose. Set
 `TRACEFRAME_TRANSCRIPT_ROOT` or `TRACEFRAME_CLAUDE_TRANSCRIPT_ROOT` when the
 transcripts live elsewhere. Claude usage defaults to a 200,000-token window;
 Opus 4.8 sessions are derived as 1,000,000 tokens from the transcript model.

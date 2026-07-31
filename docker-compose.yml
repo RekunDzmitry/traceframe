@@ -25,11 +25,22 @@ services:
       CLICKHOUSE_URL: http://traceframe:traceframe@clickhouse:8123
       TRACEFRAME_TRANSCRIPT_ROOT: ${HOME}/.codex/sessions
       TRACEFRAME_CLAUDE_TRANSCRIPT_ROOT: ${HOME}/.claude/projects
+      # The usage panel sizes agent definitions and CLAUDE.md/MEMORY.md files
+      # by reading them, and only below this root. Narrow it to the directory
+      # holding your checkouts if you would rather not expose all of $HOME.
+      TRACEFRAME_PROJECT_ROOT: ${HOME}
     ports:
       - "4000:4000"
     volumes:
       - ${HOME}/.codex/sessions:${HOME}/.codex/sessions:ro
       - ${HOME}/.claude/projects:${HOME}/.claude/projects:ro
+      # Custom agents and Memory files read "none found" in Docker until the
+      # directories holding them are mounted too -- the files live on the
+      # host. Mount what you are willing to expose, read-only, at the same
+      # path it has on the host (the reader resolves absolute paths straight
+      # out of the hook payload's cwd). For example:
+      #   - ${HOME}/.claude/agents:${HOME}/.claude/agents:ro
+      #   - ${HOME}/code:${HOME}/code:ro
     depends_on:
       clickhouse:
         condition: service_healthy
