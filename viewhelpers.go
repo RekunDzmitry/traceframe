@@ -30,12 +30,44 @@ func formatPct(v float64) string {
 	return fmt.Sprintf("%.1f%%", v)
 }
 
+// ---------- Links ----------
+
+// uiURL builds an endpoint URL from key/value pairs. Every link in the
+// templates goes through it rather than concatenating a query string by hand,
+// because session ids come from the hook payload: an agent reporting a
+// session_id containing `&`, `#` or `+` would otherwise produce a URL that
+// truncates or reparses into different parameters, and that session could
+// never be opened or shared.
+//
+// Event ids are safe by construction -- a server-generated UUID or a
+// `legacy-<hex>` digest -- which is why they are still usable as bare `#id`
+// selectors in hx-target. Session ids never appear in a selector.
+func uiURL(path string, pairs ...string) string {
+	query := url.Values{}
+	for i := 0; i+1 < len(pairs); i += 2 {
+		if pairs[i+1] == "" {
+			continue
+		}
+		query.Set(pairs[i], pairs[i+1])
+	}
+	if len(query) == 0 {
+		return path
+	}
+	return path + "?" + query.Encode()
+}
+
+// hookPayloadURL is the JSON API link the drawer's copy button fetches. The id
+// is a path segment here, not a query value, so it needs path escaping.
+func hookPayloadURL(eventID string) string {
+	return "/api/hooks/" + url.PathEscape(eventID)
+}
+
 // ---------- Replayer links ----------
 
 // replayURL is the endpoint the scrubber posts to. It carries no step of its
 // own -- the range input supplies one from its own value.
 func replayURL(ctx renderContext) string {
-	return "/ui/timeline?session=" + url.QueryEscape(ctx.SelectedSession)
+	return uiURL("/ui/timeline", "session", ctx.SelectedSession)
 }
 
 // replayStepURL pins a specific step, for the four transport buttons.
@@ -43,7 +75,7 @@ func replayStepURL(ctx renderContext, step int) string {
 	if step < 0 {
 		step = 0
 	}
-	return replayURL(ctx) + "&step=" + itoa(step)
+	return uiURL("/ui/timeline", "session", ctx.SelectedSession, "step", itoa(step))
 }
 
 // ---------- Groups ----------

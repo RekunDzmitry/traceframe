@@ -95,7 +95,7 @@ templ Page(rc renderContext, sessions []sidebarSession, totals sidebarSession, c
 			<div
 				class="session-list"
 				id="sessions"
-				hx-get={ "/ui/sessions?session=" + rc.SelectedSession }
+				hx-get={ uiURL("/ui/sessions", "session", rc.SelectedSession) }
 				hx-trigger="every 5s"
 				hx-swap="innerHTML"
 			>
@@ -119,10 +119,10 @@ templ SessionButton(rc renderContext, session sidebarSession) {
 	<button
 		type="button"
 		class={ "session-button", templ.KV("active", rc.SelectedSession == session.ID) }
-		hx-get={ "/ui/main?session=" + session.ID }
+		hx-get={ uiURL("/ui/main", "session", session.ID) }
 		hx-target="#app"
 		hx-swap="innerHTML"
-		hx-push-url={ "/?session=" + session.ID }
+		hx-push-url={ uiURL("/", "session", session.ID) }
 	>
 		<div>
 			<div class="session-name">{ session.Name }</div>

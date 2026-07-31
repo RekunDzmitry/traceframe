@@ -1,9 +1,6 @@
 package main
 
-import (
-	"fmt"
-	"net/url"
-)
+import "fmt"
 
 // EventsPanel is the header + filters + timeline for one session, or for the
 // combined "all sessions" feed. It polls itself every 5s; because expansion
@@ -19,7 +16,7 @@ templ EventsPanel(rc renderContext, title string, session *sessionSummary, tools
 					<button
 						class="delete-session"
 						type="button"
-						hx-delete={ "/ui/sessions/delete?session=" + url.QueryEscape(session.ID) }
+						hx-delete={ uiURL("/ui/sessions/delete", "session", session.ID) }
 						hx-target="#app"
 						hx-swap="innerHTML"
 						data-confirm={ fmt.Sprintf("Delete session %q and its %d events? This cannot be undone.", session.Name, session.EventCount) }
@@ -111,7 +108,7 @@ templ Filters(rc renderContext, tools []string) {
 		<button
 			class="filter-clear"
 			type="button"
-			hx-get={ "/ui/main?session=" + rc.SelectedSession }
+			hx-get={ uiURL("/ui/main", "session", rc.SelectedSession) }
 			hx-target="#app"
 			hx-swap="innerHTML"
 		>
@@ -144,7 +141,7 @@ templ UserMsgGroup(rc renderContext, group userMessageGroup, open bool) {
 			type="button"
 			class="usermsg-header"
 			aria-expanded={ boolAttr(open) }
-			hx-post={ "/ui/groups/toggle?id=" + group.ID + "&session=" + rc.SelectedSession }
+			hx-post={ uiURL("/ui/groups/toggle", "id", group.ID, "session", rc.SelectedSession) }
 			hx-target={ "#" + group.ID }
 			hx-swap="outerHTML"
 			hx-include="#filters"

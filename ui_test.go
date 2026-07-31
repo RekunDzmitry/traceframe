@@ -3,8 +3,11 @@ package main
 import (
 	"bytes"
 	"context"
+	"html"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -183,5 +186,67 @@ func TestUIDeleteRejectsNonDelete(t *testing.T) {
 	s.handleUIDeleteSession(w, httptest.NewRequest(http.MethodDelete, "/ui/sessions/delete", nil))
 	if w.Code != http.StatusNotFound {
 		t.Errorf("missing session -> %d, want 404", w.Code)
+	}
+}
+
+func TestUIURLEscapesValues(t *testing.T) {
+	got := uiURL("/ui/main", "session", "a&b=c#d e+f/g")
+	if got != "/ui/main?session=a%26b%3Dc%23d+e%2Bf%2Fg" {
+		t.Errorf("uiURL = %q", got)
+	}
+	if got := uiURL("/ui/main"); got != "/ui/main" {
+		t.Errorf("no pairs = %q, want a bare path", got)
+	}
+	if got := uiURL("/ui/main", "session", ""); got != "/ui/main" {
+		t.Errorf("empty value = %q, want it omitted", got)
+	}
+	if got := hookPayloadURL("legacy-a/b"); got != "/api/hooks/legacy-a%2Fb" {
+		t.Errorf("hookPayloadURL = %q", got)
+	}
+}
+
+// session_id comes from the hook payload, so an agent can report one holding
+// '&', '#' or '+'. Concatenated into a query string those truncate the URL or
+// reparse into different parameters, and the session becomes unopenable.
+// Round-tripping every session-scoped link back through the parser is the
+// check that matters -- escaping is only correct if it survives decoding.
+func TestSessionLinksSurviveHostileSessionIDs(t *testing.T) {
+	const hostile = "a&step=99#frag+x/y"
+	rc := renderContext{SelectedSession: hostile}
+	summary := sessionSummary{ID: hostile, Name: "hostile", EventCount: 1}
+	sidebar := sidebarSession{ID: hostile, Name: "hostile", Count: 1}
+	group := userMessageGroup{ID: "ug-e1", Turns: []turn{{}}}
+	row := eventSummary{EventID: "e1", Kind: kindTool, ToolName: "Bash"}
+
+	for name, component := range map[string]templ.Component{
+		"Page":          Page(rc, []sidebarSession{sidebar}, sidebar, templ.NopComponent),
+		"SessionButton": SessionButton(rc, sidebar),
+		"EventsPanel":   EventsPanel(rc, "hostile", &summary, nil, templ.NopComponent),
+		"UserMsgGroup":  UserMsgGroup(rc, group, false),
+		"Row":           Row(rc, row),
+		"ReplayBar":     ReplayBar(rc, 1, 2, usageBreakdown{Window: 1000}),
+	} {
+		var buf bytes.Buffer
+		if err := component.Render(context.Background(), &buf); err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		links := regexp.MustCompile(`hx-(?:get|post|delete|push-url)="([^"]*)"`).FindAllStringSubmatch(buf.String(), -1)
+		if len(links) == 0 {
+			t.Errorf("%s: no links found; the test would pass vacuously", name)
+		}
+		for _, match := range links {
+			raw := html.UnescapeString(match[1])
+			parsed, err := url.Parse(raw)
+			if err != nil {
+				t.Errorf("%s: %q does not parse: %v", name, raw, err)
+				continue
+			}
+			if parsed.Fragment != "" {
+				t.Errorf("%s: %q leaked a fragment %q", name, raw, parsed.Fragment)
+			}
+			if got := parsed.Query().Get("session"); got != "" && got != hostile {
+				t.Errorf("%s: session round-tripped as %q, want %q (from %q)", name, got, hostile, raw)
+			}
+		}
 	}
 }
