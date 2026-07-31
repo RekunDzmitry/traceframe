@@ -1,15 +1,11 @@
 .env
-.claude/settings.json
-.claude/settings.local.json
+.claude/
+.serena/
 data/
 node_modules/
 .cache/
 *.log
 .DS_Store
 .worktrees/
-<<<<<<< HEAD
 traceframe
 tsconfig.json
-node_modules
-=======
->>>>>>> origin/main

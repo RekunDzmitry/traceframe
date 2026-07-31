@@ -4,1167 +4,8 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Traceframe Hooks</title>
-    <style>
-      :root {
-        color-scheme: light;
-        --bg: #f7f7f4;
-        --panel: #ffffff;
-        --panel-alt: #fbfbf8;
-        --border: #d9d8d1;
-        --border-soft: #ecebe4;
-        --text: #202124;
-        --muted: #6b6f76;
-        --accent: #0f766e;
-        --accent-soft: #d8f3ee;
-        --shadow: 0 10px 30px rgba(32, 33, 36, 0.08);
-        --code-bg: #f6f8fa;
-        --code-text: #1f2328;
-        --diff-add: #e6ffec;
-        --diff-add-text: #1a7f37;
-        --diff-remove: #ffebe9;
-        --diff-remove-text: #b35900;
-        --error: #b31d28;
-        --error-bg: #ffebe9;
-        --success: #1a7f37;
-        --warning: #9a6700;
-        --warning-bg: #fff8c5;
-      }
-
-      * {
-        box-sizing: border-box;
-      }
-
-      body {
-        margin: 0;
-        min-height: 100vh;
-        background: var(--bg);
-        color: var(--text);
-        font-family:
-          Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
-          "Segoe UI", sans-serif;
-        letter-spacing: 0;
-      }
-
-      main {
-        width: min(1280px, calc(100% - 32px));
-        margin: 0 auto;
-        padding: 24px 0 96px;
-      }
-
-      header.app-header {
-        display: flex;
-        align-items: flex-end;
-        justify-content: space-between;
-        gap: 16px;
-        margin-bottom: 22px;
-      }
-
-      h1 {
-        margin: 0;
-        font-size: clamp(28px, 4vw, 42px);
-        line-height: 1;
-      }
-
-      .subtitle {
-        margin: 8px 0 0;
-        color: var(--muted);
-      }
-
-      button {
-        font: inherit;
-      }
-
-      .refresh {
-        border: 1px solid var(--border);
-        border-radius: 8px;
-        background: var(--panel);
-        color: var(--text);
-        cursor: pointer;
-        font-weight: 650;
-        min-height: 40px;
-        padding: 0 14px;
-        box-shadow: var(--shadow);
-      }
-      .refresh:hover {
-        border-color: var(--accent);
-      }
-
-      .layout {
-        display: grid;
-        grid-template-columns: 280px minmax(0, 1fr);
-        gap: 18px;
-        align-items: start;
-      }
-
-      .panel {
-        background: var(--panel);
-        border: 1px solid var(--border);
-        border-radius: 8px;
-        box-shadow: var(--shadow);
-      }
-
-      .sessions {
-        padding: 12px;
-        position: sticky;
-        top: 16px;
-      }
-
-      .section-title {
-        margin: 4px 4px 10px;
-        color: var(--muted);
-        font-size: 12px;
-        font-weight: 800;
-        letter-spacing: 0.08em;
-        text-transform: uppercase;
-      }
-
-      .session-list {
-        display: grid;
-        gap: 6px;
-      }
-
-      .session-button {
-        width: 100%;
-        border: 1px solid transparent;
-        border-radius: 8px;
-        background: transparent;
-        cursor: pointer;
-        display: grid;
-        grid-template-columns: minmax(0, 1fr) auto;
-        gap: 8px;
-        min-height: 54px;
-        padding: 9px 10px;
-        text-align: left;
-      }
-      .session-button:hover {
-        background: #f4f7f6;
-      }
-      .session-button.active {
-        background: var(--accent-soft);
-        border-color: #8bd4ca;
-      }
-      .session-name {
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-        font-weight: 750;
-      }
-      .session-meta {
-        color: var(--muted);
-        font-size: 12px;
-        margin-top: 3px;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-      }
-      .session-count {
-        align-self: center;
-        border-radius: 999px;
-        background: #e7e6df;
-        color: #3f4247;
-        font-size: 12px;
-        font-weight: 800;
-        min-width: 28px;
-        padding: 4px 8px;
-        text-align: center;
-      }
-
-      .events {
-        min-height: 420px;
-      }
-
-      .events-header {
-        border-bottom: 1px solid var(--border);
-        padding: 16px 18px;
-        display: grid;
-        gap: 12px;
-      }
-      .events-title-row {
-        display: flex;
-        align-items: baseline;
-        justify-content: space-between;
-        gap: 12px;
-      }
-      .events-title {
-        font-size: 20px;
-        font-weight: 800;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-      }
-      .events-actions {
-        display: flex;
-        align-items: center;
-        gap: 12px;
-      }
-      .status {
-        color: var(--muted);
-        font-size: 13px;
-      }
-      .status.error {
-        color: var(--error);
-      }
-
-      .delete-session {
-        border: 1px solid #d9a19a;
-        border-radius: 8px;
-        background: #fff7f6;
-        color: #a13225;
-        cursor: pointer;
-        font-size: 13px;
-        font-weight: 750;
-        min-height: 36px;
-        padding: 0 12px;
-      }
-      .delete-session:hover {
-        background: #fde8e5;
-        border-color: #bd5b4f;
-      }
-      .delete-session:disabled {
-        cursor: wait;
-        opacity: 0.6;
-      }
-
-      .session-stats {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 16px;
-        color: var(--muted);
-        font-size: 13px;
-      }
-      .session-stats strong {
-        color: var(--text);
-        font-weight: 750;
-        margin-right: 4px;
-      }
-
-      .filters {
-        border-bottom: 1px solid var(--border-soft);
-        padding: 12px 18px;
-        display: flex;
-        flex-wrap: wrap;
-        gap: 12px;
-        align-items: center;
-      }
-      .filter {
-        display: flex;
-        align-items: center;
-        gap: 6px;
-        font-size: 13px;
-        color: var(--muted);
-      }
-      .filter input[type="search"],
-      .filter input[type="number"],
-      .filter select {
-        border: 1px solid var(--border);
-        border-radius: 6px;
-        background: var(--panel);
-        color: var(--text);
-        font: inherit;
-        font-size: 13px;
-        min-height: 32px;
-        padding: 4px 8px;
-      }
-      .filter input[type="search"] {
-        min-width: 160px;
-      }
-      .filter-toggle {
-        display: inline-flex;
-        align-items: center;
-        gap: 4px;
-        cursor: pointer;
-        user-select: none;
-      }
-      .filter-toggle input {
-        margin: 0;
-      }
-      .filter-clear {
-        border: none;
-        background: transparent;
-        color: var(--accent);
-        cursor: pointer;
-        font-size: 12px;
-        padding: 4px 6px;
-      }
-      .filter-clear:hover {
-        text-decoration: underline;
-      }
-
-      .timeline {
-        list-style: none;
-        margin: 0;
-        padding: 0;
-      }
-
-      .turn {
-        padding: 16px 18px 0;
-      }
-      .turn + .turn {
-        border-top: 1px dashed var(--border-soft);
-        margin-top: 6px;
-      }
-      .turn-header {
-        display: flex;
-        align-items: center;
-        gap: 10px;
-        font-size: 13px;
-        color: var(--muted);
-        margin-bottom: 8px;
-      }
-      .turn-header .turn-time {
-        font-variant-numeric: tabular-nums;
-      }
-      .turn-prompt,
-      .turn-response {
-        background: var(--panel-alt);
-        border: 1px solid var(--border-soft);
-        border-radius: 10px;
-        padding: 10px 12px;
-        margin-bottom: 8px;
-      }
-      .turn-prompt .turn-prompt-label,
-      .turn-response .turn-response-label {
-        font-size: 11px;
-        font-weight: 800;
-        letter-spacing: 0.06em;
-        text-transform: uppercase;
-        color: var(--muted);
-        margin-bottom: 4px;
-      }
-      .turn-prompt .markdown,
-      .turn-response .markdown {
-        font-size: 14px;
-        line-height: 1.5;
-      }
-
-      .turn-tools {
-        list-style: none;
-        margin: 0;
-        padding: 0;
-        border: 1px solid var(--border-soft);
-        border-radius: 10px;
-        overflow: hidden;
-      }
-      .turn-tools .row:not(:last-child) {
-        border-bottom: 1px solid var(--border-soft);
-      }
-
-      .row {
-        display: grid;
-        grid-template-columns: auto minmax(0, 1fr) auto;
-        gap: 12px;
-        align-items: center;
-        padding: 10px 12px;
-        cursor: pointer;
-        background: var(--panel);
-        transition: background 80ms ease;
-      }
-      .row:hover {
-        background: var(--panel-alt);
-      }
-      .row.expanded {
-        background: var(--panel-alt);
-        cursor: default;
-      }
-      .row.dimmed {
-        opacity: 0.45;
-      }
-      .row.pending .row-icon {
-        background: #fff8c5;
-        color: #9a6700;
-      }
-      .row.error .row-icon {
-        background: var(--error-bg);
-        color: var(--error);
-      }
-      .row.ok .row-icon {
-        background: #e6ffec;
-        color: var(--success);
-      }
-
-      .row-icon {
-        width: 22px;
-        height: 22px;
-        border-radius: 50%;
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        font-size: 12px;
-        font-weight: 800;
-        background: #ecebe4;
-        color: var(--muted);
-        flex-shrink: 0;
-      }
-      .row-main {
-        min-width: 0;
-      }
-      .row-title {
-        font-size: 14px;
-        font-weight: 650;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-      }
-      .row-title .tool-tag {
-        color: var(--muted);
-        font-weight: 650;
-        margin-right: 6px;
-      }
-      .row-meta {
-        color: var(--muted);
-        font-size: 12px;
-        margin-top: 2px;
-        display: flex;
-        flex-wrap: wrap;
-        gap: 8px;
-      }
-      .row-meta .chip {
-        background: #ecebe4;
-        color: #3f4247;
-        border-radius: 999px;
-        padding: 1px 8px;
-        font-size: 11px;
-        font-weight: 700;
-      }
-      .row-meta .chip.warning {
-        background: var(--warning-bg);
-        color: var(--warning);
-      }
-      .row-meta .chip.error {
-        background: var(--error-bg);
-        color: var(--error);
-      }
-      .row-side {
-        color: var(--muted);
-        font-size: 12px;
-        font-variant-numeric: tabular-nums;
-        text-align: right;
-        white-space: nowrap;
-      }
-
-      .row-details {
-        display: none;
-        padding: 0 12px 14px 46px;
-        background: var(--panel-alt);
-        border-top: 1px solid var(--border-soft);
-      }
-      .row.expanded + .row-details {
-        display: block;
-      }
-      .details-grid {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-        gap: 14px;
-        margin-top: 10px;
-      }
-      .details-block {
-        background: var(--panel);
-        border: 1px solid var(--border-soft);
-        border-radius: 8px;
-        overflow: hidden;
-      }
-      .details-block h4 {
-        margin: 0;
-        padding: 8px 12px;
-        font-size: 12px;
-        font-weight: 800;
-        letter-spacing: 0.04em;
-        text-transform: uppercase;
-        color: var(--muted);
-        background: var(--panel-alt);
-        border-bottom: 1px solid var(--border-soft);
-      }
-      .details-block .body {
-        padding: 10px 12px;
-        font-size: 13px;
-        line-height: 1.45;
-      }
-      .kv {
-        display: grid;
-        grid-template-columns: minmax(110px, max-content) minmax(0, 1fr);
-        gap: 4px 10px;
-      }
-      .kv dt {
-        color: var(--muted);
-        font-size: 12px;
-        font-weight: 600;
-      }
-      .kv dd {
-        margin: 0;
-        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-        font-size: 12.5px;
-        overflow-wrap: anywhere;
-      }
-      .kv dd .code-inline {
-        background: var(--code-bg);
-        border-radius: 4px;
-        padding: 1px 4px;
-        color: var(--code-text);
-        font-size: 12px;
-      }
-      .kv dd pre {
-        background: var(--code-bg);
-        border-radius: 6px;
-        padding: 6px 8px;
-        margin: 4px 0 0;
-        color: var(--code-text);
-        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-        font-size: 12px;
-        line-height: 1.4;
-        max-height: 240px;
-        overflow: auto;
-        white-space: pre;
-      }
-      .kv dd pre.diff {
-        background: var(--code-bg);
-      }
-      .diff-line {
-        display: block;
-        white-space: pre;
-        padding: 0 6px;
-      }
-      .diff-line.add {
-        background: var(--diff-add);
-        color: var(--diff-add-text);
-      }
-      .diff-line.remove {
-        background: var(--diff-remove);
-        color: var(--diff-remove-text);
-      }
-      .diff-line.context {
-        color: var(--muted);
-      }
-      .stdout-block,
-      .stderr-block {
-        background: var(--code-bg);
-        color: var(--code-text);
-        border-radius: 6px;
-        padding: 6px 8px;
-        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-        font-size: 12px;
-        line-height: 1.4;
-        max-height: 240px;
-        overflow: auto;
-        white-space: pre;
-        margin: 0;
-      }
-      .stderr-block {
-        background: var(--error-bg);
-        color: var(--error);
-      }
-
-      .details-actions {
-        display: flex;
-        gap: 8px;
-        margin-top: 10px;
-        align-items: center;
-      }
-      .details-actions .grow {
-        flex: 1;
-      }
-      .btn {
-        border: 1px solid var(--border);
-        background: var(--panel);
-        color: var(--text);
-        border-radius: 6px;
-        cursor: pointer;
-        font-size: 12px;
-        font-weight: 650;
-        padding: 4px 10px;
-        min-height: 28px;
-      }
-      .btn:hover {
-        border-color: var(--accent);
-      }
-      .btn.primary {
-        background: var(--accent);
-        color: white;
-        border-color: var(--accent);
-      }
-      .btn.primary:hover {
-        filter: brightness(1.05);
-      }
-      .status-pill {
-        display: inline-flex;
-        align-items: center;
-        gap: 4px;
-        font-size: 12px;
-        font-weight: 700;
-        padding: 2px 8px;
-        border-radius: 999px;
-        background: #ecebe4;
-        color: var(--muted);
-      }
-      .status-pill.ok {
-        background: #e6ffec;
-        color: var(--success);
-      }
-      .status-pill.error {
-        background: var(--error-bg);
-        color: var(--error);
-      }
-      .status-pill.pending {
-        background: var(--warning-bg);
-        color: var(--warning);
-      }
-
-      .empty {
-        color: var(--muted);
-        padding: 48px 18px;
-        text-align: center;
-      }
-
-      .markdown h1,
-      .markdown h2,
-      .markdown h3 {
-        margin: 8px 0 4px;
-        font-weight: 800;
-        line-height: 1.25;
-      }
-      .markdown h1 {
-        font-size: 18px;
-      }
-      .markdown h2 {
-        font-size: 16px;
-      }
-      .markdown h3 {
-        font-size: 14px;
-      }
-      .markdown p {
-        margin: 4px 0;
-      }
-      .markdown ul,
-      .markdown ol {
-        margin: 4px 0;
-        padding-left: 20px;
-      }
-      .markdown code {
-        background: var(--code-bg);
-        border-radius: 4px;
-        padding: 1px 4px;
-        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-        font-size: 12.5px;
-        color: var(--code-text);
-      }
-      .markdown pre {
-        background: var(--code-bg);
-        border-radius: 6px;
-        padding: 8px 10px;
-        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-        font-size: 12px;
-        line-height: 1.45;
-        overflow: auto;
-        max-height: 320px;
-      }
-      .markdown a {
-        color: var(--accent);
-      }
-
-      /* Drawer */
-      .scrim {
-        position: fixed;
-        inset: 0;
-        background: rgba(15, 23, 42, 0.32);
-        opacity: 0;
-        pointer-events: none;
-        transition: opacity 120ms ease;
-        z-index: 40;
-      }
-      .scrim.open {
-        opacity: 1;
-        pointer-events: auto;
-      }
-      .drawer {
-        position: fixed;
-        top: 0;
-        right: 0;
-        bottom: 0;
-        width: min(620px, 96vw);
-        background: var(--panel);
-        border-left: 1px solid var(--border);
-        box-shadow: -16px 0 30px rgba(15, 23, 42, 0.08);
-        transform: translateX(100%);
-        transition: transform 160ms ease;
-        z-index: 50;
-        display: grid;
-        grid-template-rows: auto auto 1fr;
-      }
-      .drawer.open {
-        transform: translateX(0);
-      }
-      .drawer-header {
-        border-bottom: 1px solid var(--border-soft);
-        padding: 14px 18px;
-        display: flex;
-        align-items: flex-start;
-        justify-content: space-between;
-        gap: 12px;
-      }
-      .drawer-title {
-        font-size: 14px;
-        font-weight: 800;
-        margin: 0 0 2px;
-      }
-      .drawer-sub {
-        font-size: 12px;
-        color: var(--muted);
-      }
-      .drawer-toolbar {
-        padding: 10px 18px;
-        border-bottom: 1px solid var(--border-soft);
-        display: flex;
-        align-items: center;
-        gap: 8px;
-      }
-      .drawer-toolbar input[type="search"] {
-        flex: 1;
-        border: 1px solid var(--border);
-        border-radius: 6px;
-        padding: 6px 10px;
-        font: inherit;
-        font-size: 13px;
-        min-height: 32px;
-      }
-      .drawer-body {
-        overflow: auto;
-        padding: 12px 18px 24px;
-        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-        font-size: 12.5px;
-        line-height: 1.5;
-      }
-      .json-node {
-        margin: 0;
-        padding: 0;
-      }
-      .json-toggle {
-        cursor: pointer;
-        user-select: none;
-        color: var(--muted);
-        display: inline-block;
-        width: 12px;
-        text-align: center;
-      }
-      .json-toggle::before {
-        content: "▾";
-        font-size: 10px;
-      }
-      .json-node.collapsed > .json-children {
-        display: none;
-      }
-      .json-node.collapsed > .json-row > .json-toggle::before {
-        content: "▸";
-      }
-      .json-row {
-        padding-left: 0;
-        display: block;
-      }
-      .json-children {
-        margin-left: 16px;
-        border-left: 1px dashed var(--border-soft);
-        padding-left: 10px;
-      }
-      .json-key {
-        color: #0b3a8c;
-      }
-      .json-string {
-        color: var(--success);
-        white-space: pre-wrap;
-        word-break: break-all;
-      }
-      .json-number {
-        color: #953800;
-      }
-      .json-boolean,
-      .json-null {
-        color: var(--warning);
-      }
-      .json-meta {
-        color: var(--muted);
-        font-style: italic;
-      }
-      .json-row mark {
-        background: #fff3a3;
-        color: #4d3800;
-        padding: 0 2px;
-        border-radius: 2px;
-      }
-      .drawer-empty {
-        color: var(--muted);
-        padding: 24px;
-        text-align: center;
-      }
-
-      @media (max-width: 760px) {
-        main {
-          width: min(100% - 20px, 1280px);
-          padding: 18px 0;
-        }
-        header.app-header {
-          align-items: stretch;
-          flex-direction: column;
-        }
-        .layout {
-          grid-template-columns: 1fr;
-        }
-        .sessions {
-          position: static;
-        }
-        .row {
-          grid-template-columns: auto minmax(0, 1fr);
-          gap: 10px;
-        }
-        .row-side {
-          grid-column: 2;
-          text-align: left;
-        }
-        .row-details {
-          padding-left: 12px;
-        }
-        .drawer {
-          width: 100vw;
-        }
-      }
-
-      /* ---------- Context blocks view ---------- */
-      .ctx-toolbar {
-        border-bottom: 1px solid var(--border-soft);
-        padding: 10px 18px;
-        display: flex;
-        align-items: center;
-        gap: 10px;
-      }
-      .ctx-toolbar .status {
-        flex: 1;
-      }
-      .ctx-toolbar .view-toggle {
-        display: inline-flex;
-        align-items: center;
-        border: 1px solid var(--border);
-        border-radius: 6px;
-        overflow: hidden;
-      }
-      .ctx-toolbar .view-toggle button {
-        border: none;
-        background: var(--panel);
-        color: var(--muted);
-        font-size: 12px;
-        font-weight: 700;
-        padding: 6px 10px;
-        cursor: pointer;
-      }
-      .ctx-toolbar .view-toggle button.active {
-        background: var(--accent);
-        color: white;
-      }
-
-      .ctx-stack {
-        list-style: none;
-        margin: 0;
-        padding: 16px 18px 32px;
-        display: grid;
-        gap: 18px;
-      }
-
-      /* ----- Context Usage Map -------------------------------------- */
-      .ctx-header {
-        display: flex;
-        flex-direction: column;
-        gap: 4px;
-        padding: 4px 4px 0;
-      }
-      .ctx-header__title {
-        margin: 0;
-        font-size: 16px;
-        font-weight: 800;
-        letter-spacing: 0.02em;
-      }
-      .ctx-header__sub {
-        color: var(--muted);
-        font-size: 12.5px;
-        display: flex;
-        flex-wrap: wrap;
-        gap: 6px;
-      }
-      .ctx-header__model {
-        font-weight: 700;
-        color: var(--fg);
-      }
-      .ctx-header__tokens {
-        font-variant-numeric: tabular-nums;
-      }
-      .ctx-header__cache {
-        color: var(--success);
-        font-variant-numeric: tabular-nums;
-      }
-
-      /* Grid of 100 token-sized squares (10x10). */
-      .ctx-grid {
-        background: var(--panel);
-        border: 1px solid var(--border);
-        border-radius: 10px;
-        padding: 12px;
-        box-shadow: var(--shadow);
-        display: flex;
-        flex-direction: column;
-        gap: 4px;
-      }
-      .ctx-grid__row {
-        display: grid;
-        grid-template-columns: repeat(10, 1fr);
-        gap: 3px;
-      }
-      .ctx-grid__cell {
-        aspect-ratio: 1 / 1;
-        border-radius: 3px;
-        background: var(--border-soft);
-        transition: transform 80ms ease;
-      }
-      .ctx-grid__cell--system_prompt { background: #1f6feb; }
-      .ctx-grid__cell--system_tools  { background: #953800; }
-      .ctx-grid__cell--skills        { background: #b35900; }
-      .ctx-grid__cell--messages      { background: #1aa6e8; }
-      .ctx-grid__cell--free {
-        background: transparent;
-        border: 1px dashed var(--border-soft);
-      }
-      .ctx-grid__cell:hover {
-        transform: scale(1.15);
-      }
-
-      /* Message blocks: per-message tiles, sized by hit count, colored by
-         cache TTL. */
-      .ctx-msgs {
-        background: var(--panel);
-        border: 1px solid var(--border);
-        border-radius: 10px;
-        padding: 12px;
-        box-shadow: var(--shadow);
-      }
-      .ctx-msgs__header {
-        display: flex;
-        align-items: baseline;
-        justify-content: space-between;
-        margin-bottom: 10px;
-      }
-      .ctx-msgs__title {
-        font-weight: 800;
-        font-size: 13px;
-      }
-      .ctx-msgs__sub {
-        color: var(--muted);
-        font-size: 11.5px;
-      }
-      .ctx-msg-grid {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 6px;
-        align-items: center;
-        min-height: 40px;
-      }
-      .ctx-msg {
-        border-radius: 50%;
-        border: 1px solid rgba(0, 0, 0, 0.2);
-        padding: 0;
-        cursor: pointer;
-        background: var(--border-soft);
-        transition: transform 80ms ease, box-shadow 80ms ease;
-      }
-      .ctx-msg:hover {
-        transform: scale(1.2);
-        box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.1);
-      }
-      .ctx-msg--user      { background: #1f6feb; }
-      .ctx-msg--assistant { background: #1aa6e8; }
-      .ctx-msg--tool_call { background: #21d4c1; }
-
-      /* Cache TTL gradient. Red = expired, amber = close, green = fresh. */
-      .ctx-msg--ttl-expired    { background: #d93025 !important; }
-      .ctx-msg--ttl-soon       { background: #f9ab00 !important; }
-      .ctx-msg--ttl-fresh      { background: #1a7f37 !important; }
-      .ctx-msg--ttl-fresh-long { background: #0f766e !important; }
-
-      /* Per-category list at the bottom. */
-      .ctx-cats {
-        display: flex;
-        flex-direction: column;
-        gap: 4px;
-        background: var(--panel);
-        border: 1px solid var(--border);
-        border-radius: 10px;
-        padding: 12px;
-        box-shadow: var(--shadow);
-      }
-      .ctx-cat__row {
-        display: grid;
-        grid-template-columns: minmax(180px, 1fr) 2fr;
-        gap: 12px;
-        align-items: center;
-        padding: 4px 0;
-      }
-      .ctx-cat__left {
-        display: flex;
-        align-items: baseline;
-        gap: 10px;
-        font-size: 13px;
-      }
-      .ctx-cat__name {
-        font-weight: 700;
-        min-width: 110px;
-      }
-      .ctx-cat__tokens {
-        font-variant-numeric: tabular-nums;
-        color: var(--fg);
-      }
-      .ctx-cat__pct {
-        color: var(--muted);
-        font-variant-numeric: tabular-nums;
-        font-size: 12px;
-      }
-      .ctx-cat__bar {
-        height: 12px;
-        background: var(--border-soft);
-        border-radius: 6px;
-        overflow: hidden;
-      }
-      .ctx-cat__bar-fill {
-        height: 100%;
-        border-radius: 6px;
-      }
-      .ctx-cat__bar-fill--system_prompt { background: #1f6feb; }
-      .ctx-cat__bar-fill--system_tools  { background: #953800; }
-      .ctx-cat__bar-fill--skills        { background: #b35900; }
-      .ctx-cat__bar-fill--messages      { background: #1aa6e8; }
-
-      .ctx-empty {
-        padding: 20px;
-        text-align: center;
-        color: var(--muted);
-      }
-
-
-      /* Staleness tones for chips and block borders. */
-      .chip.tone-fresh { background: #e6ffec; color: var(--success); }
-      .chip.tone-warm  { background: var(--warning-bg); color: var(--warning); }
-      .chip.tone-cold  { background: #ffebe9; color: var(--error); }
-
-      /* Custom tooltip for context items. We avoid the title attribute's
-         plain-text default and show a styled panel on hover. */
-      .ctx-tooltip {
-        position: fixed;
-        z-index: 60;
-        max-width: 360px;
-        background: #202124;
-        color: #f3f3f3;
-        border-radius: 8px;
-        padding: 10px 12px;
-        font-size: 12px;
-        line-height: 1.45;
-        white-space: pre-wrap;
-        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25);
-        pointer-events: none;
-        opacity: 0;
-        transform: translateY(4px);
-        transition: opacity 80ms ease, transform 80ms ease;
-      }
-      .ctx-tooltip.visible {
-        opacity: 1;
-        transform: translateY(0);
-      }
-
-      /* Context block detail modal (clicking a message block in the
-         Context Usage Map opens this). */
-      .ctx-modal {
-        position: fixed;
-        inset: 0;
-        display: none;
-        align-items: center;
-        justify-content: center;
-        z-index: 70;
-        background: rgba(0, 0, 0, 0.35);
-      }
-      .ctx-modal.open { display: flex; }
-      .ctx-modal__panel {
-        background: var(--panel);
-        border: 1px solid var(--border);
-        border-radius: 12px;
-        box-shadow: 0 20px 60px rgba(0, 0, 0, 0.25);
-        max-width: 720px;
-        width: 90vw;
-        max-height: 80vh;
-        display: flex;
-        flex-direction: column;
-        overflow: hidden;
-      }
-      .ctx-modal__header {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        padding: 12px 16px;
-        border-bottom: 1px solid var(--border-soft);
-        background: var(--panel-alt);
-      }
-      .ctx-modal__title {
-        margin: 0;
-        font-size: 15px;
-        font-weight: 800;
-      }
-      .ctx-modal__close {
-        border: 1px solid var(--border);
-        background: var(--panel);
-        border-radius: 6px;
-        padding: 4px 10px;
-        cursor: pointer;
-        font-size: 13px;
-        font-weight: 700;
-        color: var(--muted);
-      }
-      .ctx-modal__close:hover { background: var(--border-soft); }
-      .ctx-modal__meta {
-        padding: 8px 16px;
-        display: flex;
-        flex-wrap: wrap;
-        gap: 12px;
-        font-size: 12px;
-        color: var(--muted);
-        border-bottom: 1px solid var(--border-soft);
-      }
-      .ctx-modal__meta strong { color: var(--fg); font-weight: 700; }
-      .ctx-modal__body {
-        padding: 12px 16px;
-        overflow: auto;
-        font-size: 13px;
-        line-height: 1.5;
-      }
-      .ctx-modal__section {
-        margin-bottom: 14px;
-      }
-      .ctx-modal__section h3 {
-        margin: 0 0 6px;
-        font-size: 12px;
-        text-transform: uppercase;
-        letter-spacing: 0.04em;
-        color: var(--muted);
-      }
-      .ctx-modal pre {
-        background: var(--bg);
-        border: 1px solid var(--border-soft);
-        border-radius: 6px;
-        padding: 8px 10px;
-        font-size: 12px;
-        line-height: 1.45;
-        white-space: pre-wrap;
-        word-break: break-word;
-        margin: 0;
-        max-height: 320px;
-        overflow: auto;
-      }
-      .ctx-modal__empty {
-        color: var(--muted);
-        text-align: center;
-        padding: 24px;
-      }
-    </style>
+    <link rel="stylesheet" href="/app.css" />
+    <script src="/htmx.min.js" defer></script>
   </head>
   <body>
     <main>
@@ -1190,10 +31,6 @@
               <div class="events-title" id="events-title">All sessions</div>
               <div class="events-actions">
                 <div class="status" id="status">Loading hooks...</div>
-                <div class="view-toggle" id="view-toggle" hidden>
-                  <button type="button" id="view-context" class="active">Context</button>
-                  <button type="button" id="view-timeline">Timeline</button>
-                </div>
                 <button class="delete-session" type="button" id="delete-session" hidden>
                   Delete session
                 </button>
@@ -1236,26 +73,10 @@
             </div>
             <button class="filter-clear" type="button" id="filter-clear">Clear filters</button>
           </div>
-          <div class="ctx-stack" id="context-view" hidden></div>
           <ul class="timeline" id="timeline"></ul>
           <div class="empty" id="empty" hidden>No hook events yet.</div>
         </section>
     </main>
-
-    <!-- Context block detail modal (opened by clicking a message block
-         in the Context Usage Map). -->
-    <div class="ctx-modal" id="ctx-modal" aria-hidden="true" role="dialog">
-      <div class="ctx-modal__panel">
-        <div class="ctx-modal__header">
-          <h2 class="ctx-modal__title" id="ctx-modal-title">Block details</h2>
-          <button class="ctx-modal__close" type="button" id="ctx-modal-close">Close</button>
-        </div>
-        <div class="ctx-modal__meta" id="ctx-modal-meta"></div>
-        <div class="ctx-modal__body" id="ctx-modal-body">
-          <div class="ctx-modal__empty">No block selected.</div>
-        </div>
-      </div>
-    </div>
 
     <div class="scrim" id="scrim"></div>
     <aside class="drawer" id="drawer" aria-label="Raw payload">
@@ -1280,25 +101,16 @@
       </div>
     </aside>
 
-    <div class="ctx-tooltip" id="ctx-tooltip" role="tooltip" aria-hidden="true"></div>
 
-    <script src="tokenizer.js"></script>
-    <script src="context.js"></script>
     <script>
 
       const state = {
         hooks: [],
-        // session_id -> array of every hook for that session (ASC by
-        // event_time). Used by the Context Usage Map so it sees the full
-        // session, not just the newest 300 from the global /api/hooks
-        // list (which can drop the SessionStart / system_prompt /
-        // system_tools for long-running sessions).
-        sessionHooks: new Map(),
         selectedSession: "all",
-        sessionView: "context", // "context" | "timeline"
         timeline: null,
         rawPayload: new Map(), // event_id -> payload
         expanded: new Set(), // event_ids currently expanded
+        expandedGroups: new Set(), // user-message group ids currently expanded
         filters: {
           failures: false,
           kind: "",
@@ -1319,7 +131,6 @@
 
       const sessionsEl = $("#sessions");
       const timelineEl = $("#timeline");
-      const contextEl = $("#context-view");
       const statusEl = $("#status");
       const emptyEl = $("#empty");
       const titleEl = $("#events-title");
@@ -1336,15 +147,6 @@
       const drawerSearchEl = $("#drawer-search");
       const drawerCopyEl = $("#drawer-copy");
       const drawerCloseEl = $("#drawer-close");
-      const viewToggleEl = $("#view-toggle");
-      const viewContextBtn = $("#view-context");
-      const viewTimelineBtn = $("#view-timeline");
-      const tooltipEl = $("#ctx-tooltip");
-      const ctxModalEl = $("#ctx-modal");
-      const ctxModalTitleEl = $("#ctx-modal-title");
-      const ctxModalMetaEl = $("#ctx-modal-meta");
-      const ctxModalBodyEl = $("#ctx-modal-body");
-      const ctxModalCloseEl = $("#ctx-modal-close");
       // ---------- Boot ----------
 
       refreshEl.addEventListener("click", () => loadHooks());
@@ -1353,40 +155,11 @@
       filtersEl.addEventListener("change", onFilterInput);
       $("#filter-clear").addEventListener("click", clearFilters);
       drawerCloseEl.addEventListener("click", closeDrawer);
-      ctxModalCloseEl.addEventListener("click", closeContextModal);
-      ctxModalEl.addEventListener("click", (e) => {
-        // Click on the backdrop (not the panel) closes the modal.
-        if (e.target === ctxModalEl) closeContextModal();
-      });
-      document.addEventListener("keydown", (e) => {
-        if (e.key === "Escape" && ctxModalEl.classList.contains("open")) closeContextModal();
-      });
       scrimEl.addEventListener("click", closeDrawer);
       drawerCopyEl.addEventListener("click", copyDrawerJson);
       drawerSearchEl.addEventListener("input", () => {
         state.searchTerm = drawerSearchEl.value.trim();
         renderDrawerBody();
-      });
-      // View toggle (Context vs Timeline) is per-session.
-      viewContextBtn.addEventListener("click", () => setSessionView("context"));
-      viewTimelineBtn.addEventListener("click", () => setSessionView("timeline"));
-      // Custom tooltip for context items. We avoid the native title popup
-      // (timing is OS-controlled, styling is locked) and show our own.
-      contextEl.addEventListener("mouseover", (e) => {
-        const t = e.target.closest("[data-tooltip]");
-        if (!t) return;
-        showTooltip(t.dataset.tooltip, e);
-      });
-      contextEl.addEventListener("mousemove", (e) => {
-        if (!tooltipEl.classList.contains("visible")) return;
-        positionTooltip(e);
-      });
-      contextEl.addEventListener("mouseout", (e) => {
-        const t = e.target.closest("[data-tooltip]");
-        if (!t) return;
-        // Only hide if we're really leaving the tooltip'd element.
-        if (e.relatedTarget && t.contains(e.relatedTarget)) return;
-        hideTooltip();
       });
 
       // ---------- Boot ----------
@@ -1444,35 +217,6 @@
           state.filters.tool === "Read" && $("#filter-tool").value === "Read",
           `tool=${state.filters.tool}, dropdown=${$("#filter-tool").value}`,
         );
-        // context.js aggregator + staleness semantics.
-        if (window.Traceframe && window.Traceframe.context) {
-          const cx = window.Traceframe.context;
-          for (const r of cx.runTests()) {
-            const ok = r.startsWith("PASS");
-            const name = r.replace(/^(PASS|FAIL) /, "");
-            t("context: " + name, ok, r);
-          }
-        } else {
-          t("context.js loaded", false, "window.Traceframe.context missing");
-        }
-
-        // Verifies the per-session view shows the context blocks and the
-        // view toggle is visible. Fire-and-forget: runSelfTests is sync,
-        // the render is async; the test only checks post-render DOM state.
-        if (state.selectedSession !== "all" && state.timeline) {
-          renderSessionView();
-          t(
-            "context view is visible for selected session",
-            !contextEl.hidden && timelineEl.hidden,
-            `contextEl.hidden=${contextEl.hidden} timelineEl.hidden=${timelineEl.hidden}`,
-          );
-          t(
-            "view toggle is visible for selected session",
-            !viewToggleEl.hidden,
-            `viewToggleEl.hidden=${viewToggleEl.hidden}`,
-          );
-        }
-
         window.__traceframeTests = {
           summary: results.every((r) => r.startsWith("PASS")) ? "ok" : "fail",
           lines: results,
@@ -1546,32 +290,6 @@
         }
       }
 
-      async function loadSessionHooks(sessionId) {
-        try {
-          const response = await fetch(
-            `/api/sessions/${encodeURIComponent(sessionId)}/hooks`,
-          );
-          if (!response.ok) {
-            const body = await response.json().catch(() => ({}));
-            throw new Error(body.detail || body.error || `HTTP ${response.status}`);
-          }
-          const data = await response.json();
-          return Array.isArray(data.hooks) ? data.hooks : [];
-        } catch (error) {
-          statusEl.textContent = `Failed to load session hooks: ${error.message}`;
-          statusEl.classList.add("error");
-          return [];
-        }
-      }
-
-      async function ensureSessionHooksForSelected() {
-        const id = state.selectedSession;
-        if (!id || id === "all") return;
-        if (!state.sessionHooks.has(id)) {
-          state.sessionHooks.set(id, await loadSessionHooks(id));
-        }
-      }
-
       async function loadRawPayload(eventId) {
         if (state.rawPayload.has(eventId)) {
           return state.rawPayload.get(eventId);
@@ -1585,47 +303,6 @@
         return data;
       }
 
-      // ---------- View mode helpers ----------
-
-      function setSessionView(mode) {
-        if (mode !== "context" && mode !== "timeline") return;
-        if (state.sessionView === mode) return;
-        state.sessionView = mode;
-        if (state.selectedSession !== "all") {
-          void renderSessionView();
-        }
-      }
-
-      function showTooltip(text) {
-        if (!text) {
-          hideTooltip();
-          return;
-        }
-        tooltipEl.textContent = text;
-        tooltipEl.classList.add("visible");
-        tooltipEl.setAttribute("aria-hidden", "false");
-      }
-
-      function positionTooltip(e) {
-        const pad = 14;
-        const w = tooltipEl.offsetWidth || 320;
-        const h = tooltipEl.offsetHeight || 80;
-        const vw = window.innerWidth;
-        const vh = window.innerHeight;
-        let left = e.clientX + pad;
-        let top = e.clientY + pad;
-        if (left + w > vw) left = e.clientX - w - pad;
-        if (top + h > vh) top = e.clientY - h - pad;
-        if (left < 4) left = 4;
-        if (top < 4) top = 4;
-        tooltipEl.style.left = left + "px";
-        tooltipEl.style.top = top + "px";
-      }
-
-      function hideTooltip() {
-        tooltipEl.classList.remove("visible");
-        tooltipEl.setAttribute("aria-hidden", "true");
-      }
       // ---------- Render: sessions sidebar ----------
 
       function render() {
@@ -1760,9 +437,6 @@
       function renderAllView(sessions) {
         titleEl.textContent = "All sessions";
         deleteEl.hidden = true;
-        viewToggleEl.hidden = true;
-        contextEl.hidden = true;
-        contextEl.textContent = "";
         timelineEl.hidden = false;
         sessionStatsEl.hidden = true;
         filtersEl.hidden = state.hooks.length === 0;
@@ -1785,7 +459,6 @@
       async function renderSessionView() {
         const tl = state.timeline;
         if (!tl) {
-          contextEl.textContent = "";
           timelineEl.textContent = "";
           emptyEl.hidden = false;
           emptyEl.textContent = "Loading session...";
@@ -1794,41 +467,6 @@
         const session = tl.session || {};
         titleEl.textContent = session.name || "Session";
         deleteEl.hidden = false;
-        viewToggleEl.hidden = false;
-        viewContextBtn.classList.toggle("active", state.sessionView === "context");
-        viewTimelineBtn.classList.toggle("active", state.sessionView === "timeline");
-
-        if (state.sessionView === "context") {
-          // Context Usage Map: token grid + per-message blocks + per-category
-          // breakdown. Built from the timeline and the session-scoped
-          // hook list (not the global /api/hooks, which is capped at 300
-          // newest and can drop the SessionStart / system_prompt for
-          // long-running sessions). The aggregator is async (it pulls
-          // token counts from the CDN-loaded tokenizer), so we await it
-          // before rendering.
-          timelineEl.hidden = true;
-          timelineEl.textContent = "";
-          filtersEl.hidden = true;
-          sessionStatsEl.hidden = true;
-          contextEl.hidden = false;
-          emptyEl.hidden = true;
-          await ensureSessionHooksForSelected();
-          const sessionId = tl.session && tl.session.id;
-          const sessionHooks = sessionId ? (state.sessionHooks.get(sessionId) || []) : [];
-          const data = await window.Traceframe.context.buildContextUsageMap(tl, sessionHooks);
-          window.Traceframe.context.renderContextUsageMap(data, contextEl, {
-            onItemClick: (block) => {
-              if (!block) return;
-              openContextModal(block);
-            },
-          });
-          return;
-        }
-
-        // Timeline view: the original per-turn render. Filters and stats
-        // were designed for this; reusing them keeps parity with the old UX.
-        contextEl.hidden = true;
-        contextEl.textContent = "";
         timelineEl.hidden = false;
         sessionStatsEl.hidden = false;
         renderSessionStats(session);
@@ -1868,6 +506,156 @@
         return out;
       }
 
+      /* Agents fire UserPromptSubmit for machine-injected content too —
+         background-agent reports, system reminders, the output of `!` shell
+         commands. Nobody typed those, so they must not head a group; they
+         belong to the message whose work they are part of. Detected by the
+         wrapper tag the host prepends. */
+      const INJECTED_PROMPT_PREFIXES = [
+        "<task-notification>",
+        "<system-reminder>",
+        "<local-command-caveat>",
+        "<command-name>",
+        "<command-message>",
+        "<bash-input>",
+        "<bash-stdout>",
+        "<bash-stderr>",
+      ];
+
+      /* How long after a prompt a longer re-submission still counts as the
+         same message being completed rather than a new one. */
+      const SUPERSEDED_PROMPT_WINDOW_MS = 120000;
+
+      function isInjectedPrompt(prompt) {
+        if (!prompt) return false;
+        const text = (prompt.content || "").trimStart();
+        return INJECTED_PROMPT_PREFIXES.some((tag) => text.startsWith(tag));
+      }
+
+      /**
+       * True when `a` is a fragment that `b` superseded: the user submitted,
+       * kept typing, and the host re-sent the whole message. The earlier row
+       * is then a strict prefix of the later one, arrived moments before it,
+       * and never got far enough to run a tool.
+       */
+      function supersededBy(a, b) {
+        if (!a.prompt || !b.prompt || a.toolCount !== 0) return false;
+        const at = a.prompt.content || "";
+        const bt = b.prompt.content || "";
+        if (!at || at.length >= bt.length || !bt.startsWith(at)) return false;
+        const gap = new Date(b.prompt.event_time) - new Date(a.prompt.event_time);
+        return gap >= 0 && gap <= SUPERSEDED_PROMPT_WINDOW_MS;
+      }
+
+      /**
+       * Group the server's turns by the user message that started them.
+       *
+       * The server flushes a turn on every Stop (main.go), so one prompt that
+       * spawns subagents or several stops yields several turns. A turn carries
+       * a `prompt` exactly when a UserPromptSubmit opened it, which makes it
+       * the group boundary. Turns that arrive before any prompt (the server
+       * synthesises a prompt-less turn for those) collect into one leading
+       * group.
+       *
+       * Two kinds of UserPromptSubmit are not new messages and get absorbed
+       * into the group before them: injected prompts (see above) and prompts
+       * superseded by a longer re-submission.
+       *
+       * Group ids must stay stable across the 5s refresh, so they are keyed on
+       * the prompt's event_id.
+       */
+      function groupTurnsByUserMessage(turns) {
+        const groups = [];
+        let current = null;
+        for (const t of turns || []) {
+          const startsGroup = Boolean(t.prompt) && !isInjectedPrompt(t.prompt);
+          if (startsGroup || current === null) {
+            current = {
+              id: startsGroup ? "ug:" + t.prompt.event_id : "ug:orphan",
+              prompt: startsGroup ? t.prompt : null,
+              turns: [],
+              toolCount: 0,
+            };
+            groups.push(current);
+          }
+          current.turns.push(t);
+          current.toolCount += (t.tools || []).length;
+        }
+        // Fold superseded fragments forward into the completed message. Walk
+        // backwards so a chain of edits collapses into the final submission.
+        for (let i = groups.length - 2; i >= 0; i--) {
+          if (!supersededBy(groups[i], groups[i + 1])) continue;
+          groups[i + 1].turns = groups[i].turns.concat(groups[i + 1].turns);
+          groups[i + 1].toolCount += groups[i].toolCount;
+          groups.splice(i, 1);
+        }
+        return groups;
+      }
+
+      /** True when any timeline filter is narrowing the view. */
+      function filtersActive() {
+        const f = state.filters;
+        return Boolean(f.failures || f.kind || f.tool || f.minDuration > 0 || f.file);
+      }
+
+      function usermsgHeader(group, isOpen) {
+        const header = document.createElement("div");
+        header.className = "usermsg-header";
+        header.setAttribute("role", "button");
+        header.setAttribute("tabindex", "0");
+        header.setAttribute("aria-expanded", isOpen ? "true" : "false");
+
+        const chevron = document.createElement("span");
+        chevron.className = "usermsg-chevron";
+        chevron.textContent = "▶";
+
+        const tag = document.createElement("span");
+        tag.className = "tool-tag";
+        tag.textContent = "You";
+
+        const title = document.createElement("span");
+        title.className = "usermsg-title";
+        title.textContent = group.prompt
+          ? truncate(firstLine(group.prompt.content), 120) || "(empty prompt)"
+          : "Before first prompt";
+
+        const meta = document.createElement("span");
+        meta.className = "usermsg-meta";
+        const turnCount = group.turns.length;
+        meta.textContent =
+          `${turnCount} turn${turnCount === 1 ? "" : "s"} · ` +
+          `${group.toolCount} tool${group.toolCount === 1 ? "" : "s"} · ` +
+          formatTime(group.turns[0].started_at);
+
+        header.append(chevron, tag, title, meta);
+        header.addEventListener("click", () => toggleGroup(group.id));
+        header.addEventListener("keydown", (e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            toggleGroup(group.id);
+          }
+        });
+        return header;
+      }
+
+      /** Collapse/expand one user-message group in place, no re-render, so the
+       *  5s refresh cannot steal the user's scroll position. */
+      function toggleGroup(groupId) {
+        const groupEl = timelineEl.querySelector(
+          `.usermsg[data-group-id="${cssEscape(groupId)}"]`,
+        );
+        if (!groupEl) return;
+        const turnsEl = groupEl.querySelector(".usermsg-turns");
+        const header = groupEl.querySelector(".usermsg-header");
+        if (!turnsEl || !header) return;
+        const willExpand = turnsEl.hidden;
+        if (willExpand) state.expandedGroups.add(groupId);
+        else state.expandedGroups.delete(groupId);
+        turnsEl.hidden = !willExpand;
+        groupEl.classList.toggle("expanded", willExpand);
+        header.setAttribute("aria-expanded", willExpand ? "true" : "false");
+      }
+
       function renderTurns(tl, filtered) {
         timelineEl.textContent = "";
         const filterIds = new Set(filtered.map((e) => e.event_id));
@@ -1878,58 +666,94 @@
           return;
         }
         emptyEl.hidden = true;
-        for (const t of turns) {
-          const turnEl = document.createElement("li");
-          turnEl.className = "turn";
-          const header = document.createElement("div");
-          header.className = "turn-header";
-          header.innerHTML = `<span class="turn-time">${formatTime(t.started_at)}</span><span>·</span><span>${(t.tools || []).length} tool${(t.tools || []).length === 1 ? "" : "s"}</span>`;
-          turnEl.appendChild(header);
 
-          if (t.prompt) {
-            const promptEl = document.createElement("div");
-            promptEl.className = "turn-prompt";
-            const label = document.createElement("div");
-            label.className = "turn-prompt-label";
-            label.textContent = "You";
-            const body = document.createElement("div");
-            body.className = "markdown";
-            body.innerHTML = renderMarkdown(t.prompt.content || "");
-            promptEl.append(label, body);
-            turnEl.appendChild(promptEl);
-          }
+        // Rows that fail a filter are only dimmed, which is invisible inside a
+        // collapsed group. So while a filter is active, groups holding a match
+        // are forced open. This is a render-time override on top of
+        // state.expandedGroups, never a write to it, so clearing the filter
+        // restores exactly the groups the user opened by hand.
+        const filtering = filtersActive();
 
-          const toolsEl = document.createElement("ul");
-          toolsEl.className = "turn-tools";
-          for (const tool of t.tools || []) {
-            toolsEl.appendChild(rowForEvent(tool, filterIds.has(tool.event_id)));
-            const details = detailsForEvent(tool);
-            details.hidden = !state.expanded.has(tool.event_id);
-            toolsEl.appendChild(details);
-          }
-          turnEl.appendChild(toolsEl);
+        for (const group of groupTurnsByUserMessage(turns)) {
+          const groupEl = document.createElement("li");
+          groupEl.className = "usermsg";
+          groupEl.dataset.groupId = group.id;
 
-          if (t.response) {
-            const respEl = document.createElement("div");
-            respEl.className = "turn-response";
-            const label = document.createElement("div");
-            label.className = "turn-response-label";
-            label.textContent = "Assistant";
-            const body = document.createElement("div");
-            body.className = "markdown";
-            body.innerHTML = renderMarkdown(
-              t.response.content || "_(response recorded; click View raw for the payload)_",
+          const hasMatch =
+            filtering &&
+            group.turns.some((t) =>
+              (t.tools || []).some((tool) => filterIds.has(tool.event_id)),
             );
-            respEl.append(label, body);
-            turnEl.appendChild(respEl);
-          } else {
-            const pending = document.createElement("div");
-            pending.className = "turn-response";
-            pending.innerHTML = `<div class="turn-response-label">Assistant</div><div class="status">No response yet.</div>`;
-            turnEl.appendChild(pending);
+          const isOpen = state.expandedGroups.has(group.id) || hasMatch;
+          if (isOpen) groupEl.classList.add("expanded");
+
+          groupEl.appendChild(usermsgHeader(group, isOpen));
+
+          const turnsEl = document.createElement("ul");
+          turnsEl.className = "usermsg-turns";
+          turnsEl.hidden = !isOpen;
+          for (const t of group.turns) {
+            turnsEl.appendChild(turnElement(t, filterIds));
           }
-          timelineEl.appendChild(turnEl);
+          groupEl.appendChild(turnsEl);
+
+          timelineEl.appendChild(groupEl);
         }
+      }
+
+      /** Render one server turn. Unchanged from before the user-message level
+       *  was introduced; it is now nested inside a .usermsg group. */
+      function turnElement(t, filterIds) {
+        const turnEl = document.createElement("li");
+        turnEl.className = "turn";
+        const header = document.createElement("div");
+        header.className = "turn-header";
+        header.innerHTML = `<span class="turn-time">${formatTime(t.started_at)}</span><span>·</span><span>${(t.tools || []).length} tool${(t.tools || []).length === 1 ? "" : "s"}</span>`;
+        turnEl.appendChild(header);
+
+        if (t.prompt) {
+          const promptEl = document.createElement("div");
+          promptEl.className = "turn-prompt";
+          const label = document.createElement("div");
+          label.className = "turn-prompt-label";
+          label.textContent = "You";
+          const body = document.createElement("div");
+          body.className = "markdown";
+          body.innerHTML = renderMarkdown(t.prompt.content || "");
+          promptEl.append(label, body);
+          turnEl.appendChild(promptEl);
+        }
+
+        const toolsEl = document.createElement("ul");
+        toolsEl.className = "turn-tools";
+        for (const tool of t.tools || []) {
+          toolsEl.appendChild(rowForEvent(tool, filterIds.has(tool.event_id)));
+          const details = detailsForEvent(tool);
+          details.hidden = !state.expanded.has(tool.event_id);
+          toolsEl.appendChild(details);
+        }
+        turnEl.appendChild(toolsEl);
+
+        if (t.response) {
+          const respEl = document.createElement("div");
+          respEl.className = "turn-response";
+          const label = document.createElement("div");
+          label.className = "turn-response-label";
+          label.textContent = "Assistant";
+          const body = document.createElement("div");
+          body.className = "markdown";
+          body.innerHTML = renderMarkdown(
+            t.response.content || "_(response recorded; click View raw for the payload)_",
+          );
+          respEl.append(label, body);
+          turnEl.appendChild(respEl);
+        } else {
+          const pending = document.createElement("div");
+          pending.className = "turn-response";
+          pending.innerHTML = `<div class="turn-response-label">Assistant</div><div class="status">No response yet.</div>`;
+          turnEl.appendChild(pending);
+        }
+        return turnEl;
       }
 
       // ---------- Render: flat list (all sessions) ----------
@@ -2519,82 +1343,6 @@
         drawerSearchEl.value = "";
         drawerEl.classList.remove("open");
         scrimEl.classList.remove("open");
-      }
-
-      // ---------- Context block detail modal ----------
-
-      /** Open the modal for a single message block from the Context Usage
-       *  Map. Shows the kind, tool name (if any), file path / command /
-       *  text content, and the raw payload if we can fetch it. */
-      function openContextModal(block) {
-        if (!block) return;
-        const cx = window.Traceframe.context;
-        const kind = block.kind || "event";
-        const toolName = block.tool_name || "";
-        const titleText = kind + (toolName ? " · " + toolName : "");
-        ctxModalTitleEl.textContent = titleText;
-        ctxModalMetaEl.textContent = "";
-        // Build the body — sections per content type.
-        ctxModalBodyEl.textContent = "";
-        const meta = document.createElement("div");
-        meta.className = "ctx-modal__section";
-        const metaItems = [];
-        if (block.tokens) metaItems.push("<strong>" + cx.formatTokens(block.tokens) + "</strong> tokens");
-        if (block.touched_at) metaItems.push("at " + block.touched_at);
-        if (block.cache && block.cache.hit_count) {
-          metaItems.push("<strong>" + block.cache.hit_count + "</strong> cache hit" + (block.cache.hit_count === 1 ? "" : "s"));
-        }
-        if (block.cache && block.cache.ttl_kind) {
-          metaItems.push("TTL <strong>" + block.cache.ttl_kind + "</strong>");
-        }
-        if (block.cache && block.cache.expires_at) {
-          const rem = Math.max(0, Date.parse(block.cache.expires_at) - Date.now());
-          metaItems.push("expires in " + cx.formatAge(rem));
-        }
-        if (block.event_id) {
-          metaItems.push("event <strong>" + block.event_id + "</strong>");
-        }
-        meta.innerHTML = metaItems.join(" &middot; ");
-        ctxModalMetaEl.appendChild(meta);
-        // Content sections.
-        const sections = [];
-        if (block.text) {
-          sections.push({ h: "Content", pre: block.text });
-        }
-        if (block.subtitle) {
-          sections.push({ h: "Target", pre: block.subtitle });
-        }
-        if (block.input && Object.keys(block.input).length > 0) {
-          sections.push({ h: "Input", pre: JSON.stringify(block.input, null, 2) });
-        }
-        if (block.output) {
-          const out = typeof block.output === "string" ? block.output : JSON.stringify(block.output, null, 2);
-          sections.push({ h: "Output", pre: out });
-        }
-        if (sections.length === 0) {
-          const empty = document.createElement("div");
-          empty.className = "ctx-modal__empty";
-          empty.textContent = "No additional content for this block.";
-          ctxModalBodyEl.appendChild(empty);
-        } else {
-          for (const s of sections) {
-            const sec = document.createElement("div");
-            sec.className = "ctx-modal__section";
-            const h3 = document.createElement("h3");
-            h3.textContent = s.h;
-            const pre = document.createElement("pre");
-            pre.textContent = s.pre;
-            sec.append(h3, pre);
-            ctxModalBodyEl.appendChild(sec);
-          }
-        }
-        ctxModalEl.classList.add("open");
-        ctxModalEl.setAttribute("aria-hidden", "false");
-      }
-
-      function closeContextModal() {
-        ctxModalEl.classList.remove("open");
-        ctxModalEl.setAttribute("aria-hidden", "true");
       }
 
       function renderDrawerBody() {

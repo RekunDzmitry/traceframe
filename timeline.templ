@@ -1,0 +1,219 @@
+package main
+
+import "fmt"
+
+// EventsPanel is the header + filters + timeline for one session, or for the
+// combined "all sessions" feed. It polls itself every 5s; because expansion
+// state lives in a cookie the server reads, a poll repaints the same
+// disclosures the user has open.
+templ EventsPanel(rc renderContext, title string, session *sessionSummary, tools []string, body templ.Component) {
+	<div class="events-header">
+		<div class="events-title-row">
+			<div class="events-title">{ title }</div>
+			<div class="events-actions">
+				<div class="status" id="status"></div>
+				if session != nil {
+					<button
+						class="delete-session"
+						type="button"
+						hx-delete={ "/api/sessions/" + session.ID }
+						hx-target="#app"
+						hx-swap="innerHTML"
+						data-confirm={ fmt.Sprintf("Delete session %q and its %d events? This cannot be undone.", session.Name, session.EventCount) }
+					>
+						Delete session
+					</button>
+				}
+			</div>
+		</div>
+		if session != nil {
+			<div class="session-stats">
+				<span><strong>{ session.TurnCount }</strong>turns</span>
+				<span><strong>{ session.ToolCount }</strong>tools</span>
+				<span><strong>{ session.EventCount }</strong>events</span>
+				<span><strong>{ formatDuration(session.DurationMS) }</strong>duration</span>
+				if session.FailureCount > 0 {
+					<span class="danger"><strong>{ session.FailureCount }</strong>failures</span>
+				}
+			</div>
+		}
+	</div>
+	@Filters(rc, tools)
+	<div id="timeline-region">
+		@body
+	</div>
+}
+
+// Filters posts every change back as query parameters, which makes a filtered
+// view shareable -- the JS read them straight off the DOM and kept them only in
+// memory.
+templ Filters(rc renderContext, tools []string) {
+	<form
+		class="filters"
+		id="filters"
+		hx-get="/ui/timeline"
+		hx-target="#timeline-region"
+		hx-swap="innerHTML"
+		hx-trigger="change, input from:input[type=search] delay:300ms, input from:input[type=number] delay:300ms"
+		hx-include="this"
+		hx-push-url="true"
+	>
+		<input type="hidden" name="session" value={ rc.SelectedSession }/>
+		<div class="filter">
+			<label class="filter-toggle">
+				<input type="checkbox" name="failures" value="1" checked?={ rc.Filters.Failures }/>
+				Only failures
+			</label>
+		</div>
+		<div class="filter">
+			<label for="filter-kind">Kind</label>
+			<select id="filter-kind" name="kind">
+				@option("", "All", rc.Filters.Kind)
+				@option("tool", "Tool", rc.Filters.Kind)
+				@option("user_prompt", "User prompt", rc.Filters.Kind)
+				@option("assistant_stop", "Assistant", rc.Filters.Kind)
+				@option("session_start", "Session start", rc.Filters.Kind)
+				@option("session_end", "Session end", rc.Filters.Kind)
+				@option("notification", "Notification", rc.Filters.Kind)
+				@option("permission_request", "Permission", rc.Filters.Kind)
+				@option("compact", "Compact", rc.Filters.Kind)
+			</select>
+		</div>
+		<div class="filter">
+			<label for="filter-tool">Tool</label>
+			<select id="filter-tool" name="tool">
+				@option("", "All", rc.Filters.Tool)
+				for _, name := range tools {
+					@option(name, name, rc.Filters.Tool)
+				}
+			</select>
+		</div>
+		<div class="filter">
+			<label for="filter-min-dur">Min duration (ms)</label>
+			<input
+				type="number"
+				id="filter-min-dur"
+				name="min_duration"
+				min="0"
+				step="10"
+				placeholder="0"
+				if rc.Filters.MinDuration > 0 {
+					value={ rc.Filters.MinDuration }
+				}
+			/>
+		</div>
+		<div class="filter">
+			<label for="filter-file">File path contains</label>
+			<input type="search" id="filter-file" name="file" placeholder="e.g. static/index.html" value={ rc.Filters.File }/>
+		</div>
+		<button
+			class="filter-clear"
+			type="button"
+			hx-get={ "/ui/main?session=" + rc.SelectedSession }
+			hx-target="#app"
+			hx-swap="innerHTML"
+		>
+			Clear filters
+		</button>
+	</form>
+}
+
+templ option(value, label, selected string) {
+	<option value={ value } selected?={ value == selected }>{ label }</option>
+}
+
+// Timeline is the single-session view: user-message groups, each holding the
+// turns the agent produced before the next message.
+templ Timeline(rc renderContext, groups []userMessageGroup, matched map[string]bool) {
+	if len(groups) == 0 {
+		<div class="empty">No turns in this session.</div>
+	} else {
+		<ul class="timeline">
+			for _, group := range groups {
+				@UserMsgGroup(rc, group, groupIsOpen(rc, group, matched))
+			}
+		</ul>
+	}
+}
+
+templ UserMsgGroup(rc renderContext, group userMessageGroup, open bool) {
+	<li class={ "usermsg", templ.KV("expanded", open) } id={ group.ID }>
+		<button
+			type="button"
+			class="usermsg-header"
+			aria-expanded={ boolAttr(open) }
+			hx-post={ "/ui/groups/toggle?id=" + group.ID + "&session=" + rc.SelectedSession }
+			hx-target={ "#" + group.ID }
+			hx-swap="outerHTML"
+			hx-include="#filters"
+		>
+			<span class="usermsg-chevron">&#9654;</span>
+			<span class="tool-tag">You</span>
+			<span class="usermsg-title">{ groupTitle(group) }</span>
+			<span class="usermsg-meta">
+				{ plural(len(group.Turns), "turn") } &#183; { plural(group.ToolCount, "tool") } &#183; { rc.FormatTime(group.StartedAt()) }
+			</span>
+		</button>
+		<ul class="usermsg-turns" hidden?={ !open }>
+			for _, t := range group.Turns {
+				@Turn(rc, t)
+			}
+		</ul>
+	</li>
+}
+
+templ Turn(rc renderContext, t turn) {
+	<li class="turn">
+		<div class="turn-header">
+			<span class="turn-time">{ rc.FormatTime(t.StartedAt) }</span>
+			<span>&#183;</span>
+			<span>{ plural(len(t.Tools), "tool") }</span>
+		</div>
+		if t.Prompt != nil {
+			<div class="turn-prompt">
+				<div class="turn-prompt-label">You</div>
+				<div class="markdown">@templ.Raw(renderMarkdown(t.Prompt.Content))</div>
+			</div>
+		}
+		<ul class="turn-tools">
+			for _, tool := range t.Tools {
+				@Row(rc, tool)
+			}
+		</ul>
+		<div class="turn-response">
+			<div class="turn-response-label">Assistant</div>
+			if t.Response != nil {
+				<div class="markdown">
+					@templ.Raw(renderMarkdown(responseText(t.Response)))
+				</div>
+			} else {
+				<div class="status">No response yet.</div>
+			}
+		</div>
+	</li>
+}
+
+// FlatList is the "all sessions" view: rows grouped by session rather than by
+// user message, since turns only exist within a session.
+templ FlatList(rc renderContext, groups []flatSessionGroup) {
+	if len(groups) == 0 {
+		<div class="empty">No hook events yet.</div>
+	} else {
+		<ul class="timeline">
+			for _, group := range groups {
+				<li class="turn">
+					<div class="turn-header">
+						<span>{ group.Name }</span>
+						<span>&#183;</span>
+						<span class="turn-time">{ rc.FormatTime(group.LastEvent) }</span>
+					</div>
+					<ul class="turn-tools">
+						for _, ev := range group.Events {
+							@Row(rc, ev)
+						}
+					</ul>
+				</li>
+			}
+		</ul>
+	}
+}

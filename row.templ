@@ -1,0 +1,186 @@
+package main
+
+// Row is one event line. It is a <button> rather than a div with role/tabindex,
+// which is how the JS faked it -- that also deletes the Enter/Space keydown
+// handlers and fixes focus for free.
+//
+// The details block is a sibling, not a child: the stylesheet selects
+// `.row.expanded + .row-details`, so the two must stay adjacent.
+templ Row(rc renderContext, ev eventSummary) {
+	<li class="row-wrap" id={ "row-" + ev.EventID }>
+		<button
+			type="button"
+			class={ "row", rowStatusClass(ev), templ.KV("expanded", rc.IsOpen(ev.EventID)) }
+			aria-expanded={ boolAttr(rc.IsOpen(ev.EventID)) }
+			hx-post={ "/ui/rows/toggle?id=" + ev.EventID + "&session=" + rc.SelectedSession }
+			hx-target={ "#row-" + ev.EventID }
+			hx-swap="outerHTML"
+		>
+			<span class="row-icon">{ iconFor(ev) }</span>
+			<div class="row-main">
+				<div class="row-title">
+					<span class="tool-tag">{ rowTag(ev) }</span>
+					{ summaryFor(ev) }
+				</div>
+				if len(chipsFor(ev)) > 0 {
+					<div class="row-meta">
+						for _, c := range chipsFor(ev) {
+							<span class={ "chip", c.Tone }>{ c.Text }</span>
+						}
+					</div>
+				}
+			</div>
+			<div class="row-side">
+				if durationFor(ev) != "" {
+					{ durationFor(ev) }
+					<br/>
+				}
+				<div>{ rc.FormatTime(ev.EventTime) }</div>
+			</div>
+		</button>
+		if rc.IsOpen(ev.EventID) {
+			@RowDetails(ev)
+		}
+	</li>
+}
+
+templ RowDetails(ev eventSummary) {
+	<div class="row-details">
+		<div class="details-grid">
+			if ev.Kind == kindTool {
+				@BlockInput(ev)
+				@BlockOutput(ev)
+			} else if ev.Kind == kindUserPrompt || ev.Kind == kindAssistantStop {
+				if ev.Content != "" {
+					<div class="details-block">
+						<h4>
+							if ev.Kind == kindUserPrompt {
+								Prompt
+							} else {
+								Response
+							}
+						</h4>
+						<div class="body">
+							<pre class="text-block">{ ev.Content }</pre>
+						</div>
+					</div>
+				}
+			}
+		</div>
+		<div class="details-actions">
+			if ev.Status == statusError && ev.Error != "" {
+				<span class="status-pill error">Error: { ev.Error }</span>
+			} else if ev.Status == statusPending {
+				<span class="status-pill pending">Pending post-event</span>
+			}
+			<span class="grow"></span>
+			<button
+				class="btn"
+				type="button"
+				hx-get={ "/ui/raw?id=" + ev.EventID }
+				hx-target="#drawer-content"
+				hx-swap="innerHTML"
+				hx-on:click="event.stopPropagation(); document.getElementById('drawer').classList.add('open'); document.getElementById('scrim').classList.add('open')"
+			>
+				View raw
+			</button>
+		</div>
+	</div>
+}
+
+templ BlockInput(ev eventSummary) {
+	<div class="details-block">
+		<h4>Input</h4>
+		<div class="body">
+			<dl class="kv">
+				if len(ev.Input) == 0 {
+					<dd class="muted">(no input captured)</dd>
+				} else {
+					for _, key := range sortedKeys(ev.Input) {
+						<dt>{ key }</dt>
+						<dd>@FormatValue(ev.Input[key])</dd>
+					}
+				}
+			</dl>
+		</div>
+	</div>
+}
+
+templ BlockOutput(ev eventSummary) {
+	<div class="details-block">
+		<h4>Output</h4>
+		<div class="body">
+			if isPendingOutput(ev) {
+				Waiting for the PostToolUse event&#8230;
+			} else if ev.ToolName == "Edit" || ev.ToolName == "MultiEdit" {
+				@Diff(structuredPatch(ev))
+			} else if ev.ToolName == "Bash" {
+				@Bash(inputCommand(ev), ev.Output)
+			} else if ev.ToolName == "Read" {
+				@ReadOutput(ev.Output)
+			} else {
+				<dl class="kv">
+					if len(ev.Output) == 0 {
+						<dd class="muted">(no output captured)</dd>
+					} else {
+						for _, key := range sortedKeys(ev.Output) {
+							<dt>{ key }</dt>
+							<dd>@FormatValue(ev.Output[key])</dd>
+						}
+					}
+				</dl>
+			}
+		</div>
+	</div>
+}
+
+templ Bash(command string, output map[string]any) {
+	if command != "" {
+		<div class="status block-label">Command</div>
+		<pre class="stdout-block">{ command }</pre>
+	}
+	if s := stringField(output, "stdout"); s != "" {
+		<div class="status block-label">stdout</div>
+		<pre class="stdout-block">{ s }</pre>
+	}
+	if s := stringField(output, "stderr"); s != "" {
+		<div class="status block-label">stderr</div>
+		<pre class="stderr-block">{ s }</pre>
+	}
+	if code, ok := intField(output, "exitCode"); ok {
+		<div class="status block-label">exit { code }</div>
+	}
+}
+
+templ ReadOutput(output map[string]any) {
+	<div class="status block-label">{ readMeta(output) }</div>
+	if s := stringField(output, "content"); s != "" {
+		<pre class="stdout-block">{ s }</pre>
+	}
+}
+
+templ Diff(hunks []diffHunk) {
+	if len(hunks) == 0 {
+		<span class="muted">(no diff available)</span>
+	} else {
+		for _, hunk := range hunks {
+			<div class="status block-label">{ hunk.Header() }</div>
+			<pre class="stdout-block diff">
+				for _, line := range hunk.Lines {
+					<span class={ "diff-line", diffLineClass(line) }>{ line + "\n" }</span>
+				}
+			</pre>
+		}
+	}
+}
+
+// FormatValue mirrors the JS type dispatch: long strings and structures become
+// <pre>, short scalars stay inline.
+templ FormatValue(value any) {
+	switch v := formatValue(value); v.Block {
+		case true:
+			<pre>{ v.Text }</pre>
+		default:
+			<span class={ v.Class }>{ v.Text }</span>
+	}
+}

@@ -20,16 +20,27 @@ import (
 	"strings"
 	"sync"
 	"time"
+	// The runtime image is alpine, which ships no zoneinfo. Embedding the
+	// tzdata database (~450KB) lets time.LoadLocation resolve whatever IANA
+	// zone the browser reports, without an apk package in the Dockerfile.
+	_ "time/tzdata"
 )
 
-//go:embed static/index.html static/context.js static/tokenizer.js
+//go:embed static/index.html static/app.css static/htmx.min.js
 var staticFiles embed.FS
 
-var (
-	indexHTML   []byte
-	contextJS   []byte
-	tokenizerJS []byte
-)
+var indexHTML []byte
+
+// staticAsset is an embedded file served with a content type and a strong
+// ETag, so the browser re-fetches app.css and htmx only when the binary
+// changes. The ETag is derived at startup from the content itself.
+type staticAsset struct {
+	body        []byte
+	contentType string
+	etag        string
+}
+
+var staticAssets = map[string]*staticAsset{}
 
 func init() {
 	var err error
@@ -37,11 +48,21 @@ func init() {
 	if err != nil {
 		panic(err)
 	}
-	contextJS, err = staticFiles.ReadFile("static/context.js")
-	if err != nil {
-		panic(err)
+	for route, spec := range map[string]struct{ path, contentType string }{
+		"/app.css":     {"static/app.css", "text/css; charset=utf-8"},
+		"/htmx.min.js": {"static/htmx.min.js", "application/javascript; charset=utf-8"},
+	} {
+		body, err := staticFiles.ReadFile(spec.path)
+		if err != nil {
+			panic(err)
+		}
+		sum := sha256.Sum256(body)
+		staticAssets[route] = &staticAsset{
+			body:        body,
+			contentType: spec.contentType,
+			etag:        `"` + hex.EncodeToString(sum[:8]) + `"`,
+		}
 	}
-	tokenizerJS, err = staticFiles.ReadFile("static/tokenizer.js")
 }
 
 // maxReadBytes caps the size of incoming hook POST bodies.
@@ -113,24 +134,23 @@ type eventSummary struct {
 	Error          string         `json:"error,omitempty"`
 	ContextTokens  int64          `json:"context_tokens,omitempty"`
 	ContextWindow  int64          `json:"context_window,omitempty"`
-	Model          string        `json:"model,omitempty"`
-	Usage          *eventUsage   `json:"usage,omitempty"`
+	Model          string         `json:"model,omitempty"`
+	Usage          *eventUsage    `json:"usage,omitempty"`
 }
 
 // eventUsage is the Anthropic API `usage` block we forward verbatim.
 // Carries the per-response cache stats that power the Context Usage Map
 // cache-expiration + hit-count rendering.
 type eventUsage struct {
-	InputTokens                int `json:"input_tokens"`
-	OutputTokens               int `json:"output_tokens"`
-	CacheCreationInputTokens   int `json:"cache_creation_input_tokens,omitempty"`
-	CacheReadInputTokens       int `json:"cache_read_input_tokens,omitempty"`
-	CacheCreation              *struct {
+	InputTokens              int `json:"input_tokens"`
+	OutputTokens             int `json:"output_tokens"`
+	CacheCreationInputTokens int `json:"cache_creation_input_tokens,omitempty"`
+	CacheReadInputTokens     int `json:"cache_read_input_tokens,omitempty"`
+	CacheCreation            *struct {
 		Ephemeral5mInputTokens int `json:"ephemeral_5m_input_tokens,omitempty"`
 		Ephemeral1hInputTokens int `json:"ephemeral_1h_input_tokens,omitempty"`
 	} `json:"cache_creation,omitempty"`
 }
-
 
 func extractUsage(payload map[string]any) *eventUsage {
 	if payload == nil {
@@ -243,8 +263,9 @@ func main() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", s.handleIndex)
 	mux.HandleFunc("/healthz", s.handleHealth)
-	mux.HandleFunc("/context.js", s.handleContextJS)
-	mux.HandleFunc("/tokenizer.js", s.handleTokenizerJS)
+	for route := range staticAssets {
+		mux.HandleFunc(route, s.handleStaticAsset)
+	}
 	mux.HandleFunc("/api/hooks", s.handleHooksCollection)
 	mux.HandleFunc("/api/hooks/", s.handleHookByID)
 	mux.HandleFunc("/api/sessions/", s.handleSessionRoute)
@@ -258,9 +279,31 @@ func main() {
 
 // --- HTTP handlers ---
 
-func (s *server) handleIndex(w http.ResponseWriter, _ *http.Request) {
+func (s *server) handleIndex(w http.ResponseWriter, r *http.Request) {
+	// "/" is a catch-all in http.ServeMux, so anything unrouted lands here.
+	// Without this check a typo returned the page with a 200.
+	if r.URL.Path != "/" {
+		http.NotFound(w, r)
+		return
+	}
 	w.Header().Set("content-type", "text/html; charset=utf-8")
 	_, _ = w.Write(indexHTML)
+}
+
+func (s *server) handleStaticAsset(w http.ResponseWriter, r *http.Request) {
+	asset, ok := staticAssets[r.URL.Path]
+	if !ok {
+		http.NotFound(w, r)
+		return
+	}
+	w.Header().Set("content-type", asset.contentType)
+	w.Header().Set("etag", asset.etag)
+	w.Header().Set("cache-control", "no-cache")
+	if match := r.Header.Get("if-none-match"); match == asset.etag {
+		w.WriteHeader(http.StatusNotModified)
+		return
+	}
+	_, _ = w.Write(asset.body)
 }
 
 func (s *server) handleHealth(w http.ResponseWriter, r *http.Request) {
@@ -378,19 +421,6 @@ func (s *server) listHooks(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"hooks": summaries})
 }
 
-
-func (s *server) handleContextJS(w http.ResponseWriter, _ *http.Request) {
-	w.Header().Set("content-type", "application/javascript; charset=utf-8")
-	w.Header().Set("cache-control", "no-cache")
-	_, _ = w.Write(contextJS)
-}
-
-func (s *server) handleTokenizerJS(w http.ResponseWriter, _ *http.Request) {
-	w.Header().Set("content-type", "application/javascript; charset=utf-8")
-	w.Header().Set("cache-control", "no-cache")
-	_, _ = w.Write(tokenizerJS)
-}
-
 func (s *server) serveHookDetail(w http.ResponseWriter, r *http.Request, eventID string) {
 	// Match either the synthetic UUID (event_id column) or the deterministic
 	// natural_id (which is what the list endpoint returns for legacy rows
@@ -454,13 +484,14 @@ func (s *server) serveSessionTimeline(w http.ResponseWriter, r *http.Request, se
 	timeline := buildTimeline(summaries)
 	writeJSON(w, http.StatusOK, timeline)
 }
+
 // serveSessionHooks returns every hook row for one session in chronological
-// order (oldest first). The Context Usage Map aggregator reads from this
-// instead of the global /api/hooks list (which is capped at 300 newest and
-// can silently omit the SessionStart/system prompt/tool definitions for
+// order (oldest first), uncapped, unlike the global /api/hooks list (which
+// keeps only the 300 newest and can silently omit the SessionStart for
 // long-running sessions). The timeline endpoint at
 // /api/sessions/{id}/timeline wraps the same query in a turn-grouped view;
-// this raw form is what the aggregator wants.
+// this is the raw form. The UI no longer calls it — it is kept as a public
+// API for scripting against a single session.
 func (s *server) serveSessionHooks(w http.ResponseWriter, r *http.Request, sessionID string) {
 	query := fmt.Sprintf(`
 		SELECT %s
@@ -1220,10 +1251,11 @@ func buildToolSummary(pre, post *hookEvent) eventSummary {
 
 // buildToolOneLiner creates a single-line description for the compact row.
 // Examples:
-//   "Edit static/index.html +3/-2"
-//   "Read README.md lines 1-120"
-//   "Bash Build application"
-//   "Write main.go 50 lines"
+//
+//	"Edit static/index.html +3/-2"
+//	"Read README.md lines 1-120"
+//	"Bash Build application"
+//	"Write main.go 50 lines"
 func buildToolOneLiner(toolName string, input map[string]any, post *hookEvent, cwd string) string {
 	switch toolName {
 	case "Edit", "MultiEdit":
