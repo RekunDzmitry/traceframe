@@ -22,6 +22,13 @@ type renderContext struct {
 	Filters         timelineFilters
 	Open            map[string]bool
 	Loc             *time.Location
+
+	// Cursor is the history replayer's position: how many rows of the
+	// session are revealed. CursorSet distinguishes "replay to step 0"
+	// (show nothing) from "no step parameter" (show everything), which a
+	// bare int cannot.
+	Cursor    int
+	CursorSet bool
 }
 
 func (c renderContext) IsOpen(id string) bool { return c.Open[id] }
@@ -220,15 +227,18 @@ func supersededBy(a, b userMessageGroup) bool {
 //
 // Group ids are keyed on the prompt's event_id so they stay stable across the
 // refresh -- the cookie that records which groups are open depends on that.
+// The separator is a hyphen, not a colon: the id goes into an hx-target as
+// `#<id>`, and a colon there makes an invalid CSS selector, so htmx silently
+// finds no element and the disclosure never toggles.
 func groupTurnsByUserMessage(turns []turn) []userMessageGroup {
 	var groups []userMessageGroup
 	current := -1
 	for _, t := range turns {
 		startsGroup := t.Prompt != nil && !isInjectedPrompt(t.Prompt)
 		if startsGroup || current < 0 {
-			group := userMessageGroup{ID: "ug:orphan"}
+			group := userMessageGroup{ID: "ug-orphan"}
 			if startsGroup {
-				group.ID = "ug:" + t.Prompt.EventID
+				group.ID = "ug-" + t.Prompt.EventID
 				group.Prompt = t.Prompt
 			}
 			groups = append(groups, group)

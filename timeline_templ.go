@@ -58,9 +58,9 @@ func EventsPanel(rc renderContext, title string, session *sessionSummary, tools 
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var3 string
-			templ_7745c5c3_Var3, templ_7745c5c3_Err = templ.ResolveAttributeValue("/api/sessions/" + session.ID)
+			templ_7745c5c3_Var3, templ_7745c5c3_Err = templ.ResolveAttributeValue(uiURL("/ui/sessions/delete", "session", session.ID))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `timeline.templ`, Line: 19, Col: 47}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `timeline.templ`, Line: 19, Col: 69}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var3)
 			if templ_7745c5c3_Err != nil {
@@ -217,14 +217,14 @@ func Filters(rc renderContext, tools []string) templ.Component {
 			templ_7745c5c3_Var10 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 18, "<form class=\"filters\" id=\"filters\" hx-get=\"/ui/timeline\" hx-target=\"#timeline-region\" hx-swap=\"innerHTML\" hx-trigger=\"change, input from:input[type=search] delay:300ms, input from:input[type=number] delay:300ms\" hx-include=\"this\" hx-push-url=\"true\"><input type=\"hidden\" name=\"session\" value=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 18, "<form class=\"filters\" id=\"filters\" hx-get=\"/ui/timeline\" hx-target=\"#timeline-region\" hx-swap=\"innerHTML\" hx-trigger=\"change, input from:input[type=search] delay:300ms, input from:input[type=number] delay:300ms\" hx-include=\"this\"><input type=\"hidden\" name=\"session\" value=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var11 string
 		templ_7745c5c3_Var11, templ_7745c5c3_Err = templ.ResolveAttributeValue(rc.SelectedSession)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `timeline.templ`, Line: 61, Col: 64}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `timeline.templ`, Line: 60, Col: 64}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var11)
 		if templ_7745c5c3_Err != nil {
@@ -306,7 +306,7 @@ func Filters(rc renderContext, tools []string) templ.Component {
 			var templ_7745c5c3_Var12 string
 			templ_7745c5c3_Var12, templ_7745c5c3_Err = templ.ResolveAttributeValue(rc.Filters.MinDuration)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `timeline.templ`, Line: 101, Col: 35}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `timeline.templ`, Line: 100, Col: 35}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var12)
 			if templ_7745c5c3_Err != nil {
@@ -317,14 +317,14 @@ func Filters(rc renderContext, tools []string) templ.Component {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 26, "></div><div class=\"filter\"><label for=\"filter-file\">File path contains</label> <input type=\"search\" id=\"filter-file\" name=\"file\" placeholder=\"e.g. static/index.html\" value=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 26, "></div><div class=\"filter\"><label for=\"filter-file\">File path contains</label> <input type=\"search\" id=\"filter-file\" name=\"file\" placeholder=\"e.g. static/app.css\" value=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var13 string
 		templ_7745c5c3_Var13, templ_7745c5c3_Err = templ.ResolveAttributeValue(rc.Filters.File)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `timeline.templ`, Line: 107, Col: 113}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `timeline.templ`, Line: 106, Col: 110}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var13)
 		if templ_7745c5c3_Err != nil {
@@ -335,9 +335,9 @@ func Filters(rc renderContext, tools []string) templ.Component {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var14 string
-		templ_7745c5c3_Var14, templ_7745c5c3_Err = templ.ResolveAttributeValue("/ui/main?session=" + rc.SelectedSession)
+		templ_7745c5c3_Var14, templ_7745c5c3_Err = templ.ResolveAttributeValue(uiURL("/ui/main", "session", rc.SelectedSession))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `timeline.templ`, Line: 112, Col: 52}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `timeline.templ`, Line: 111, Col: 60}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var14)
 		if templ_7745c5c3_Err != nil {
@@ -379,7 +379,7 @@ func option(value, label, selected string) templ.Component {
 		var templ_7745c5c3_Var16 string
 		templ_7745c5c3_Var16, templ_7745c5c3_Err = templ.ResolveAttributeValue(value)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `timeline.templ`, Line: 122, Col: 22}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `timeline.templ`, Line: 121, Col: 22}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var16)
 		if templ_7745c5c3_Err != nil {
@@ -402,7 +402,7 @@ func option(value, label, selected string) templ.Component {
 		var templ_7745c5c3_Var17 string
 		templ_7745c5c3_Var17, templ_7745c5c3_Err = templ.JoinStringErrs(label)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `timeline.templ`, Line: 122, Col: 64}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `timeline.templ`, Line: 121, Col: 64}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var17))
 		if templ_7745c5c3_Err != nil {
@@ -510,7 +510,7 @@ func UserMsgGroup(rc renderContext, group userMessageGroup, open bool) templ.Com
 		var templ_7745c5c3_Var22 string
 		templ_7745c5c3_Var22, templ_7745c5c3_Err = templ.ResolveAttributeValue(group.ID)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `timeline.templ`, Line: 140, Col: 66}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `timeline.templ`, Line: 139, Col: 66}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var22)
 		if templ_7745c5c3_Err != nil {
@@ -523,7 +523,7 @@ func UserMsgGroup(rc renderContext, group userMessageGroup, open bool) templ.Com
 		var templ_7745c5c3_Var23 string
 		templ_7745c5c3_Var23, templ_7745c5c3_Err = templ.ResolveAttributeValue(boolAttr(open))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `timeline.templ`, Line: 144, Col: 33}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `timeline.templ`, Line: 143, Col: 33}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var23)
 		if templ_7745c5c3_Err != nil {
@@ -534,9 +534,9 @@ func UserMsgGroup(rc renderContext, group userMessageGroup, open bool) templ.Com
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var24 string
-		templ_7745c5c3_Var24, templ_7745c5c3_Err = templ.ResolveAttributeValue("/ui/groups/toggle?id=" + group.ID + "&session=" + rc.SelectedSession)
+		templ_7745c5c3_Var24, templ_7745c5c3_Err = templ.ResolveAttributeValue(uiURL("/ui/groups/toggle", "id", group.ID, "session", rc.SelectedSession))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `timeline.templ`, Line: 145, Col: 82}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `timeline.templ`, Line: 144, Col: 86}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var24)
 		if templ_7745c5c3_Err != nil {
@@ -549,7 +549,7 @@ func UserMsgGroup(rc renderContext, group userMessageGroup, open bool) templ.Com
 		var templ_7745c5c3_Var25 string
 		templ_7745c5c3_Var25, templ_7745c5c3_Err = templ.ResolveAttributeValue("#" + group.ID)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `timeline.templ`, Line: 146, Col: 29}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `timeline.templ`, Line: 145, Col: 29}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var25)
 		if templ_7745c5c3_Err != nil {
@@ -562,7 +562,7 @@ func UserMsgGroup(rc renderContext, group userMessageGroup, open bool) templ.Com
 		var templ_7745c5c3_Var26 string
 		templ_7745c5c3_Var26, templ_7745c5c3_Err = templ.JoinStringErrs(groupTitle(group))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `timeline.templ`, Line: 152, Col: 50}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `timeline.templ`, Line: 151, Col: 50}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var26))
 		if templ_7745c5c3_Err != nil {
@@ -575,7 +575,7 @@ func UserMsgGroup(rc renderContext, group userMessageGroup, open bool) templ.Com
 		var templ_7745c5c3_Var27 string
 		templ_7745c5c3_Var27, templ_7745c5c3_Err = templ.JoinStringErrs(plural(len(group.Turns), "turn"))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `timeline.templ`, Line: 154, Col: 38}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `timeline.templ`, Line: 153, Col: 38}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var27))
 		if templ_7745c5c3_Err != nil {
@@ -588,7 +588,7 @@ func UserMsgGroup(rc renderContext, group userMessageGroup, open bool) templ.Com
 		var templ_7745c5c3_Var28 string
 		templ_7745c5c3_Var28, templ_7745c5c3_Err = templ.JoinStringErrs(plural(group.ToolCount, "tool"))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `timeline.templ`, Line: 154, Col: 81}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `timeline.templ`, Line: 153, Col: 81}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var28))
 		if templ_7745c5c3_Err != nil {
@@ -601,7 +601,7 @@ func UserMsgGroup(rc renderContext, group userMessageGroup, open bool) templ.Com
 		var templ_7745c5c3_Var29 string
 		templ_7745c5c3_Var29, templ_7745c5c3_Err = templ.JoinStringErrs(rc.FormatTime(group.StartedAt()))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `timeline.templ`, Line: 154, Col: 125}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `timeline.templ`, Line: 153, Col: 125}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var29))
 		if templ_7745c5c3_Err != nil {
@@ -663,7 +663,7 @@ func Turn(rc renderContext, t turn) templ.Component {
 		var templ_7745c5c3_Var31 string
 		templ_7745c5c3_Var31, templ_7745c5c3_Err = templ.JoinStringErrs(rc.FormatTime(t.StartedAt))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `timeline.templ`, Line: 168, Col: 55}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `timeline.templ`, Line: 167, Col: 55}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var31))
 		if templ_7745c5c3_Err != nil {
@@ -676,7 +676,7 @@ func Turn(rc renderContext, t turn) templ.Component {
 		var templ_7745c5c3_Var32 string
 		templ_7745c5c3_Var32, templ_7745c5c3_Err = templ.JoinStringErrs(plural(len(t.Tools), "tool"))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `timeline.templ`, Line: 170, Col: 39}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `timeline.templ`, Line: 169, Col: 39}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var32))
 		if templ_7745c5c3_Err != nil {
@@ -782,7 +782,7 @@ func FlatList(rc renderContext, groups []flatSessionGroup) templ.Component {
 				var templ_7745c5c3_Var34 string
 				templ_7745c5c3_Var34, templ_7745c5c3_Err = templ.JoinStringErrs(group.Name)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `timeline.templ`, Line: 206, Col: 24}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `timeline.templ`, Line: 205, Col: 24}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var34))
 				if templ_7745c5c3_Err != nil {
@@ -795,7 +795,7 @@ func FlatList(rc renderContext, groups []flatSessionGroup) templ.Component {
 				var templ_7745c5c3_Var35 string
 				templ_7745c5c3_Var35, templ_7745c5c3_Err = templ.JoinStringErrs(rc.FormatTime(group.LastEvent))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `timeline.templ`, Line: 208, Col: 62}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `timeline.templ`, Line: 207, Col: 62}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var35))
 				if templ_7745c5c3_Err != nil {

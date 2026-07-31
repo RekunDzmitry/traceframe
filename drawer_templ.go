@@ -76,9 +76,9 @@ func DrawerContent(eventID, eventName, sessionID, term string, payload jsonNode)
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var5 string
-		templ_7745c5c3_Var5, templ_7745c5c3_Err = templ.ResolveAttributeValue("/ui/raw?id=" + eventID)
+		templ_7745c5c3_Var5, templ_7745c5c3_Err = templ.ResolveAttributeValue(uiURL("/ui/raw", "id", eventID))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `drawer.templ`, Line: 27, Col: 35}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `drawer.templ`, Line: 27, Col: 43}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var5)
 		if templ_7745c5c3_Err != nil {
@@ -89,7 +89,7 @@ func DrawerContent(eventID, eventName, sessionID, term string, payload jsonNode)
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var6 string
-		templ_7745c5c3_Var6, templ_7745c5c3_Err = templ.ResolveAttributeValue("/api/hooks/" + eventID)
+		templ_7745c5c3_Var6, templ_7745c5c3_Err = templ.ResolveAttributeValue(hookPayloadURL(eventID))
 		if templ_7745c5c3_Err != nil {
 			return templ.Error{Err: templ_7745c5c3_Err, FileName: `drawer.templ`, Line: 35, Col: 45}
 		}

@@ -24,7 +24,7 @@ templ DrawerContent(eventID, eventName, sessionID, term string, payload jsonNode
 			placeholder="Search keys or values&#8230;"
 			autocomplete="off"
 			value={ term }
-			hx-get={ "/ui/raw?id=" + eventID }
+			hx-get={ uiURL("/ui/raw", "id", eventID) }
 			hx-target="#drawer-content"
 			hx-swap="innerHTML"
 			hx-trigger="input changed delay:200ms"
@@ -32,7 +32,7 @@ templ DrawerContent(eventID, eventName, sessionID, term string, payload jsonNode
 		<button
 			class="btn primary"
 			type="button"
-			data-copy-target={ "/api/hooks/" + eventID }
+			data-copy-target={ hookPayloadURL(eventID) }
 		>
 			Copy JSON
 		</button>

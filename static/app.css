@@ -283,6 +283,156 @@ button {
   text-decoration: underline;
 }
 
+/* History replayer: transport controls, scrubber, and the context breakdown
+   they drive. The banner is sticky because scrubbing is a back-and-forth
+   gesture -- losing the controls once the revealed rows grow past a screen
+   would mean scrolling up for every step. */
+.replay {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+  padding: 12px 14px;
+  background: var(--panel-alt);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: var(--shadow);
+}
+
+.replay-controls {
+  display: flex;
+  flex: 1 1 260px;
+  gap: 12px;
+  align-items: center;
+  min-width: 0;
+}
+
+.replay-buttons {
+  display: flex;
+  gap: 4px;
+}
+
+.replay-button {
+  min-width: 34px;
+  padding: 6px 8px;
+  font-size: 15px;
+  line-height: 1;
+  color: var(--text);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+}
+.replay-button:hover:not(:disabled) {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+}
+.replay-button:disabled {
+  color: var(--muted);
+  cursor: default;
+  opacity: 0.5;
+}
+
+.replay-scrubber {
+  flex: 1 1 auto;
+  min-width: 120px;
+  accent-color: var(--accent);
+}
+
+.replay-count {
+  display: flex;
+  gap: 4px;
+  align-items: baseline;
+  font-size: 12px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.replay-count strong {
+  font-size: 14px;
+  color: var(--text);
+}
+
+/* Usage panel: the terminal-styled breakdown docked at the right of the
+   banner. Monospace and right-aligned numbers so the columns line up as the
+   figures change width while scrubbing. */
+.usage {
+  flex: 0 1 380px;
+  padding: 10px 12px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  color: #e6e6e6;
+  background: #1b1b1b;
+  border-radius: 8px;
+}
+
+.usage-title {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  margin-bottom: 6px;
+  font-style: italic;
+  color: #cfcfcf;
+}
+.usage-model {
+  font-size: 11px;
+  font-style: normal;
+  color: #8f8f8f;
+}
+
+.usage-list {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.usage-row {
+  display: grid;
+  grid-template-columns: 14px minmax(0, 1fr) auto auto;
+  gap: 6px;
+  align-items: baseline;
+}
+.usage-row.free {
+  color: #9f9f9f;
+}
+.usage-icon {
+  color: #7bb7ae;
+}
+.usage-tokens,
+.usage-pct {
+  text-align: right;
+  white-space: nowrap;
+}
+.usage-pct {
+  color: #9f9f9f;
+}
+.usage-approx {
+  margin-left: 2px;
+  color: #7f7f7f;
+  text-decoration: none;
+  cursor: help;
+}
+.usage-note {
+  grid-column: 2 / -1;
+  font-size: 11px;
+  color: #8f8f8f;
+}
+
+@media (max-width: 900px) {
+  .replay {
+    position: static;
+  }
+  .usage {
+    flex: 1 1 100%;
+  }
+}
+
 .timeline {
   list-style: none;
   margin: 0;

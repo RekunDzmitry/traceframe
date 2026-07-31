@@ -1,0 +1,71 @@
+package main
+
+// ReplayBar is the history replayer: four transport controls, a scrubber, and
+// the usage panel that re-reads the context at whatever step you land on.
+//
+// Every control is a plain hx-get against /ui/timeline, so the whole
+// region -- buttons, scrubber, usage figures and rows -- arrives in one swap
+// and cannot drift out of sync. hx-include pulls the filter form along, since
+// the cursor counts the rows that survive filtering. The handler answers with
+// an HX-Push-Url header so the address bar gets the page URL for this step --
+// making a replay position shareable and reload-safe -- rather than the
+// fragment endpoint hx-push-url="true" would have pushed.
+templ ReplayBar(rc renderContext, cursor, total int, usage usageBreakdown) {
+	<div class="replay">
+		<div class="replay-controls">
+			<div class="replay-buttons" role="group" aria-label="History replayer">
+				@replayButton(rc, "&#171;", "Jump to the beginning", 0, cursor == 0)
+				@replayButton(rc, "&#8249;", "Back one step", cursor-1, cursor == 0)
+				@replayButton(rc, "&#8250;", "Forward one step", cursor+1, cursor >= total)
+				@replayButton(rc, "&#187;", "Jump to the end", total, cursor >= total)
+			</div>
+			<input
+				class="replay-scrubber"
+				type="range"
+				name="step"
+				min="0"
+				max={ itoa(total) }
+				value={ itoa(cursor) }
+				aria-label="Replay position"
+				hx-get={ replayURL(rc) }
+				hx-target="#timeline-region"
+				hx-swap="innerHTML"
+				hx-trigger="change"
+				hx-include="#filters"
+				hx-sync="#timeline-region:replace"
+			/>
+			<div class="replay-count">
+				<strong>{ cursor }</strong>
+				<span>/ { total } rows</span>
+			</div>
+		</div>
+		@UsagePanel(usage)
+	</div>
+}
+
+// replayButton is one transport control. A disabled button is rendered
+// disabled rather than hidden so the group does not reflow as you reach either
+// end of the session.
+//
+// hx-sync serialises the controls against the region they all write: without
+// it two clicks in flight at once can land out of order and leave the rows
+// showing one step while the buttons link to another. The trade-off is that
+// clicking faster than the round trip coalesces -- each button links to a step
+// computed from the markup it was rendered with, so a second click issued
+// before the first lands repeats it.
+templ replayButton(rc renderContext, glyph, label string, step int, disabled bool) {
+	<button
+		class="replay-button"
+		type="button"
+		title={ label }
+		aria-label={ label }
+		disabled?={ disabled }
+		hx-get={ replayStepURL(rc, step) }
+		hx-target="#timeline-region"
+		hx-swap="innerHTML"
+		hx-include="#filters"
+		hx-sync="#timeline-region:replace"
+	>
+		@templ.Raw(glyph)
+	</button>
+}

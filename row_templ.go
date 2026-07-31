@@ -88,9 +88,9 @@ func Row(rc renderContext, ev eventSummary) templ.Component {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var6 string
-		templ_7745c5c3_Var6, templ_7745c5c3_Err = templ.ResolveAttributeValue("/ui/rows/toggle?id=" + ev.EventID + "&session=" + rc.SelectedSession)
+		templ_7745c5c3_Var6, templ_7745c5c3_Err = templ.ResolveAttributeValue(uiURL("/ui/rows/toggle", "id", ev.EventID, "session", rc.SelectedSession))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `row.templ`, Line: 15, Col: 82}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `row.templ`, Line: 15, Col: 86}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var6)
 		if templ_7745c5c3_Err != nil {
@@ -356,9 +356,9 @@ func RowDetails(ev eventSummary) templ.Component {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var19 string
-		templ_7745c5c3_Var19, templ_7745c5c3_Err = templ.ResolveAttributeValue("/ui/raw?id=" + ev.EventID)
+		templ_7745c5c3_Var19, templ_7745c5c3_Err = templ.ResolveAttributeValue(uiURL("/ui/raw", "id", ev.EventID))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `row.templ`, Line: 80, Col: 39}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `row.templ`, Line: 80, Col: 47}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var19)
 		if templ_7745c5c3_Err != nil {

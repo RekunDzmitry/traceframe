@@ -16,7 +16,7 @@ templ EventsPanel(rc renderContext, title string, session *sessionSummary, tools
 					<button
 						class="delete-session"
 						type="button"
-						hx-delete={ "/api/sessions/" + session.ID }
+						hx-delete={ uiURL("/ui/sessions/delete", "session", session.ID) }
 						hx-target="#app"
 						hx-swap="innerHTML"
 						data-confirm={ fmt.Sprintf("Delete session %q and its %d events? This cannot be undone.", session.Name, session.EventCount) }
@@ -56,7 +56,6 @@ templ Filters(rc renderContext, tools []string) {
 		hx-swap="innerHTML"
 		hx-trigger="change, input from:input[type=search] delay:300ms, input from:input[type=number] delay:300ms"
 		hx-include="this"
-		hx-push-url="true"
 	>
 		<input type="hidden" name="session" value={ rc.SelectedSession }/>
 		<div class="filter">
@@ -104,12 +103,12 @@ templ Filters(rc renderContext, tools []string) {
 		</div>
 		<div class="filter">
 			<label for="filter-file">File path contains</label>
-			<input type="search" id="filter-file" name="file" placeholder="e.g. static/index.html" value={ rc.Filters.File }/>
+			<input type="search" id="filter-file" name="file" placeholder="e.g. static/app.css" value={ rc.Filters.File }/>
 		</div>
 		<button
 			class="filter-clear"
 			type="button"
-			hx-get={ "/ui/main?session=" + rc.SelectedSession }
+			hx-get={ uiURL("/ui/main", "session", rc.SelectedSession) }
 			hx-target="#app"
 			hx-swap="innerHTML"
 		>
@@ -142,7 +141,7 @@ templ UserMsgGroup(rc renderContext, group userMessageGroup, open bool) {
 			type="button"
 			class="usermsg-header"
 			aria-expanded={ boolAttr(open) }
-			hx-post={ "/ui/groups/toggle?id=" + group.ID + "&session=" + rc.SelectedSession }
+			hx-post={ uiURL("/ui/groups/toggle", "id", group.ID, "session", rc.SelectedSession) }
 			hx-target={ "#" + group.ID }
 			hx-swap="outerHTML"
 			hx-include="#filters"

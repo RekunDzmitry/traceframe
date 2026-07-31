@@ -1,0 +1,47 @@
+package main
+
+// UsagePanel is the context breakdown docked in the replayer banner. It is
+// rebuilt on every step, so the figures describe the context as it stood at
+// that point in the session rather than at the end of it.
+//
+// "Estimated" is in the title because it is: without a tokenizer in-tree the
+// per-category split is a character heuristic, and the per-row marker says
+// which numbers those are.
+templ UsagePanel(usage usageBreakdown) {
+	<div class="usage">
+		<div class="usage-title">
+			Estimated usage by category
+			if usage.Model != "" {
+				<span class="usage-model">{ usage.Model }</span>
+			}
+		</div>
+		<ul class="usage-list">
+			for _, category := range usage.Categories {
+				<li class={ "usage-row", templ.KV("free", category.Name == "Free space") }>
+					<span class="usage-icon" aria-hidden="true">{ category.Icon }</span>
+					<span class="usage-name">{ category.Name }:</span>
+					<span class="usage-tokens">{ formatTokens(category.Tokens) } tokens</span>
+					<span class="usage-pct">
+						({ formatPct(category.Pct(usage.Window)) })
+						if category.Estimated {
+							<abbr class="usage-approx" title="character-based estimate">~</abbr>
+						}
+					</span>
+					if category.Note != "" {
+						<span class="usage-note">{ category.Note }</span>
+					}
+				</li>
+			}
+		</ul>
+	</div>
+}
+
+// ErrorBlock renders a failed fragment as markup. htmx swaps the response body
+// straight into the page, so an error has to be HTML or it lands as raw text
+// where the timeline should be.
+templ ErrorBlock(detail string) {
+	<div class="empty error">
+		<strong>Could not load this view.</strong>
+		<div>{ detail }</div>
+	</div>
+}
